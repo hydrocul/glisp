@@ -1,29 +1,32 @@
 #!/usr/bin/ruby
 # -*- ruby-mode -*- -*- coding: utf-8 -*-
 
+EOF = :"$eof"
+UNDEFINED = :"$undefined"
+
+EVAL_FINAL = 1
+EVAL_FUNCTION_DEFINITION = 2
+EVAL_OPTIMIZATION = 3
+EVAL_SELF_REF = 4
+
 class GlispObject
 
-  EVAL_FINAL = 1
-  EVAL_FUNCTION_DEFINITION = 2
-  EVAL_OPTIMIZATION = 3
-  EVAL_SELF_REF = 4
-
   def self.create(rubyObj)
-    if GlispObject === rubyObj then
+    if rubyObj.is_a? GlispObject then
       rubyObj
-    elsif Symbol === rubyObj then
+    elsif rubyObj.is_a? Symbol then
       SymbolGlispObject.new(rubyObj)
-    elsif String === rubyObj then
+    elsif rubyObj.is_a? String then
       StringGlispObject.new(rubyObj)
-    elsif Integer === rubyObj then
+    elsif rubyObj.is_a? Integer then
       NumberGlispObject.new(rubyObj)
-    elsif Float === rubyObj then
+    elsif rubyObj.is_a? Float then
       NumberGlispObject.new(rubyObj)
     elsif rubyObj == false or rubyObj == true then
       BooleanGlispObject.new(rubyObj)
-    elsif Proc === rubyObj then
+    elsif rubyObj.is_a? Proc then
       ProcGlispObject.new(rubyObj)
-    elsif Array === rubyObj then
+    elsif rubyObj.is_a? Array then
       if rubyObj.length == 0 then
         ConsGlispObject.nill
       else
@@ -51,12 +54,20 @@ class GlispObject
     false
   end
 
+  def eval(expr, env, stack, step, level)
+    [expr, step]
+  end
+
 end # GlispObject
 
 class SymbolGlispObject < GlispObject
 
   def initialize(sym)
     @sym = sym
+  end
+
+  def ==(other)
+    other.is_a? SymbolGlispObject and other.symbol == symbol
   end
 
   def to_rubyObj
@@ -67,12 +78,38 @@ class SymbolGlispObject < GlispObject
     [@sym.to_s]
   end
 
+  def symbol
+    @sym
+  end
+
+  def eval(expr, env, stack, step, level)
+    index, value = stack.get_by_key(self)
+    if index then
+      if level == EVAL_FINAL or value != UNDEFINED then
+        return [value, step - 1]
+      end
+      return [List.list(:"stack-get", index), step - 1]
+    end
+    exists, value, is_val = env.global.get(symbol)
+    if exists then
+      if level == EVAL_FINAL or is_val then
+        return [value, step - 1]
+      end
+      return [List.list(:"global-get", symbol), step - 1]
+    end
+    return [self, step]
+  end
+
 end # SymbolGlispObject
 
 class StringGlispObject < GlispObject
 
   def initialize(val)
     @val = val
+  end
+
+  def ==(other)
+    other.is_a? StringGlispObject and other.val == val
   end
 
   def to_rubyObj
@@ -95,6 +132,10 @@ class NumberGlispObject < GlispObject
     @val = val
   end
 
+  def ==(other)
+    other.is_a? NumberGlispObject and other.val == val
+  end
+
   def to_rubyObj
     val
   end
@@ -113,6 +154,10 @@ class BooleanGlispObject < GlispObject
 
   def initialize(val)
     @val = val
+  end
+
+  def ==(other)
+    other.is_a? BooleanGlispObject and other.val == val
   end
 
   def to_rubyObj
@@ -134,6 +179,10 @@ class ProcGlispObject < GlispObject
   def initialize(proc, can_calc_on_compile)
     @proc = proc
     @can_calc_on_compile = can_calc_on_compile
+  end
+
+  def ==(other)
+    other.is_a? ProcGlispObject and other.proc == proc
   end
 
   def to_rubyObj
@@ -171,6 +220,22 @@ class SelfRefGlispObject < GlispObject
 end # SelfRefGlispObject
 
 class ListGlispObject < GlispObject
+
+  def ==(other)
+    if not other.is_a? ListGlispObject then
+      return false
+    end
+    if other.is_nil and self.is_nil then
+      return true
+    end
+    if other.is_nil or self.is_nil then
+      return false
+    end
+    if other.car != self.car then
+      return false
+    end
+    return self.cdr == other.cdr
+  end
 
   def to_rubyObj
     to_list
@@ -305,10 +370,10 @@ end # NilGlispObject
 class ConsGlispObject < ListGlispObject
 
   def initialize(car, cdr)
-    if not GlispObject === car then
+    if not car.is_a? GlispObject then
       raise Exception, car.inspect
     end
-    if not ListGlispObject === cdr then
+    if not cdr.is_a? ListGlispObject then
       raise Exception, cdr.inspect
     end
     @car = car
@@ -327,12 +392,12 @@ class ConsGlispObject < ListGlispObject
     if x.empty? then
       NilGlispObject.instance
     else
-      List.new(x[0], List.list(*x[1..-1]))
+      List.new(GlispObject.create(x[0]), List.list(*x[1..-1]))
     end
   end
 
   def self.list2(e1, e2)
-    List.cons(e1, List.cons(e2, self.nill))
+    List.cons(GlispObject.create(e1), List.cons(GlispObject.create(e2), self.nill))
   end
 
   def car
@@ -369,6 +434,9 @@ class Global
   end
 
   def get(symbol)
+    if symbol.is_a? GlispObject then
+      raise Excpetion, symbol.inspect
+    end
     if @vals.has_key?(symbol) then
       [true, @vals[symbol], true]
     elsif @vars.has_key?(symbol) then
@@ -379,10 +447,16 @@ class Global
   end
 
   def createVar(symbol)
+    if symbol.is_a? GlispObject then
+      raise Excpetion, symbol.inspect
+    end
     @vars[symbol] = nil
   end
 
   def set(symbol, value)
+    if symbol.is_a? GlispObject then
+      raise Excpetion, symbol.inspect
+    end
     if @vars.has_key?(symbol) then
       @vars[symbol] = value
     else
