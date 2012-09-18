@@ -248,6 +248,22 @@ class ProcGlispObject < GlispObject
     @can_calc_on_compile
   end
 
+  def eval_func_call(args, env, stack, step, level)
+    args, step = args.eval_list_each(env, stack, step, level)
+    return [gl_cons(self, args), step] if step == 0
+    if level != EVAL_FINAL and
+        (not can_calc_on_compile or not args.is_permanent_all) then
+      return [gl_cons(self, args), step]
+    end
+    begin
+      return [gl_create(@proc.call(* args.to_list)), step - 1]
+    rescue
+      return [gl_list(:throw,
+                      '[%s] %s' % [e.class, e.message],
+                      :Exception), step - 1]
+    end
+  end
+
 end # ProcGlispObject
 
 class SelfRefGlispObject < GlispObject
@@ -395,6 +411,13 @@ class ListGlispObject < GlispObject
     end
   end
 
+  def eval_list_each(env, stack, step, level)
+    # TODO
+  end
+
+  def is_permanent_all
+  end
+
 end # ListGlispObject
 
 class NilGlispObject < ListGlispObject
@@ -465,8 +488,7 @@ class BasicConsGlispObject < ListGlispObject
       if quote_level == 1 then
         prev_step = step
         value, step = value.eval(env, stack, step, level)
-        return [gl_cons(:unquote, value), step] if step == 0
-        # if step == prev_step
+        return [gl_cons(:unquote, value), step] if step == 0 or not value.is_permanent
         [value.eval_force, step - 1]
       else
         value, step = value.eval_quote(env, stack, step, level, quote_depth - 1)
@@ -476,7 +498,7 @@ class BasicConsGlispObject < ListGlispObject
       new_car = car.eval_quote(env, stack, step, level, quote_depth)
       return [gl_cons(new_car, cdr), step] if step == 0
       new_cdr = cdr.eval_quote(env, stack, step, level, quote_depth)
-      [gl_cons(new_car, cdr), step]
+      [gl_cons(new_car, new_cdr), step]
     end
   end
 
@@ -602,6 +624,20 @@ class ConsGlispObject < BasicConsGlispObject
   end
 
   def _eval_func_call(env, stack, step, level)
+    new_car, step = car.eval(env, stack, step, level)
+    return [gl_cons(new_car, cdr), step] if step == 0
+    if new_car.is_a? ProcGlispObject then
+      return new_car.eval_func_call(cdr, env, stack, step, level)
+    elsif new_car.is_a? ListGlispObject then
+      return _eval_lisp_func_call(env, stack, step, level)
+    else
+      return [gl_list(:throw,
+                      'Not function.',
+                      :Exception), step - 1]
+    end
+  end
+
+  def _eval_lisp_func_call(env, stack, step, level)
     # TODO
   end
 
@@ -690,6 +726,10 @@ class InterpreterEnv
 
   def initialize
     @global = Global.new
+  end
+
+  def global
+    @global
   end
 
 end # InterpreterEnv
@@ -849,6 +889,14 @@ def do_test
                '( quote ( a b c ) )'
               ])
 
+  do_test_sub(env, "(+ 2 3)",
+              [
+               '( + 2 3 )',
+               '( Proc* 2 3 )',
+               '5',
+               '5'
+              ])
+
 end
 
 def do_test_sub(env, str, expected_patterns)
@@ -860,7 +908,8 @@ def do_test_sub(env, str, expected_patterns)
 end
 
 def _test_convert_pattern(pattern)
-  Regexp.new('^' + pattern.gsub(/\(/, '\(').gsub(/\)/, '\)').gsub(/\*/, '[^>]+') + '$')
+  Regexp.new('^' + pattern.gsub(/\+/, '\\\\+').
+             gsub(/\(/, '\(').gsub(/\)/, '\)').gsub(/\*/, '[^>]+') + '$')
 end
 
 def _test_eval_expr(expr, env, expected_patterns)
@@ -871,23 +920,27 @@ def _test_eval_expr(expr, env, expected_patterns)
     expr_s = expr.to_s
     print "expr:             %s\n" % [expr_s]
 
+    if offset >= expected_patterns.length then
+      print "FAILED! Too much!\n"
+      break
+    end
     pattern = expected_patterns[offset]
     pattern_regexp = _test_convert_pattern(pattern)
     offset = offset + 1
     if not pattern_regexp =~ expr_s then
       print "FAILED! Expected: %s\n" % [pattern]
-      STDOUT.flush
       break
     end
     STDOUT.flush
 
     if step > 0 then
-      return expr
+      break
     end
 
-    expr, step = expr.eval(env, [], 1, EVAL_FINAL)
+    expr, step = expr.eval(env, gl_create([]), 1, EVAL_FINAL)
 
   end
+  STDOUT.flush
 end
 
 if __FILE__ == $PROGRAM_NAME then
