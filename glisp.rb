@@ -1,41 +1,68 @@
 #!/usr/bin/ruby
 # -*- ruby-mode -*- -*- coding: utf-8 -*-
 
+require 'stringio'
+
 EOF = :"$eof"
-UNDEFINED = :"$undefined"
+UNDEFINED = :"$undefined-on-compile"
 
 EVAL_FINAL = 1
 EVAL_FUNCTION_DEFINITION = 2
 EVAL_OPTIMIZATION = 3
-EVAL_SELF_REF = 4
+
+def gl_create(rubyObj)
+  if rubyObj.is_a? GlispObject then
+    rubyObj
+  elsif rubyObj.is_a? Symbol then
+    SymbolGlispObject.new(rubyObj)
+  elsif rubyObj.is_a? String then
+    StringGlispObject.new(rubyObj)
+  elsif rubyObj.is_a? Integer then
+    NumberGlispObject.new(rubyObj)
+  elsif rubyObj.is_a? Float then
+    NumberGlispObject.new(rubyObj)
+  elsif rubyObj == false or rubyObj == true then
+    BooleanGlispObject.new(rubyObj)
+  elsif rubyObj.is_a? Proc then
+    ProcGlispObject.new(rubyObj)
+  elsif rubyObj.is_a? Array then
+    _gl_createList(rubyObj, 0)
+  elsif rubyObj == nil then
+    gl_nill
+  else
+    raise Exception, rubyObj.inspect
+  end
+end
+
+def _gl_createList(arrayRubyObj, offset)
+  if offset == arrayRubyObj.length then
+    gl_nill
+  else
+    gl_cons(arrayRubyObj[offset], _gl_createList(arrayRubyObj, offset + 1))
+  end
+end
+
+def gl_nill
+  NilGlispObject.instance
+end
+
+def gl_cons(car, cdr)
+  ConsGlispObject.new(car, cdr)
+end
+
+def gl_list(*x)
+  if x.empty? then
+    gl_nill
+  else
+    gl_cons(x[0], gl_list(*x[1..-1]))
+  end
+end
+
+def gl_list2(e1, e2)
+  gl_cons(e1, gl_cons(e2, nil))
+end
 
 class GlispObject
-
-  def self.create(rubyObj)
-    if rubyObj.is_a? GlispObject then
-      rubyObj
-    elsif rubyObj.is_a? Symbol then
-      SymbolGlispObject.new(rubyObj)
-    elsif rubyObj.is_a? String then
-      StringGlispObject.new(rubyObj)
-    elsif rubyObj.is_a? Integer then
-      NumberGlispObject.new(rubyObj)
-    elsif rubyObj.is_a? Float then
-      NumberGlispObject.new(rubyObj)
-    elsif rubyObj == false or rubyObj == true then
-      BooleanGlispObject.new(rubyObj)
-    elsif rubyObj.is_a? Proc then
-      ProcGlispObject.new(rubyObj)
-    elsif rubyObj.is_a? Array then
-      if rubyObj.length == 0 then
-        ConsGlispObject.nill
-      else
-        ConsGlispObject.cons(create(rubyObj[0]), create(rubyObj.slice(1..-1)))
-      end
-    else
-      raise Exception, rubyObj.inspect
-    end
-  end
 
   def to_rubyObj
     self
@@ -54,8 +81,13 @@ class GlispObject
     false
   end
 
-  def eval(expr, env, stack, step, level)
-    [expr, step]
+  def eval(env, stack, step, level)
+    [self, step]
+  end
+
+  # (quote ...) の場合に quote を削除する
+  def eval_force
+    self
   end
 
 end # GlispObject
@@ -82,20 +114,23 @@ class SymbolGlispObject < GlispObject
     @sym
   end
 
-  def eval(expr, env, stack, step, level)
+  def eval(env, stack, step, level)
     index, value = stack.get_by_key(self)
     if index then
       if level == EVAL_FINAL or value != UNDEFINED then
-        return [value, step - 1]
+        # 参照先が SelfRefGlispObject だった場合は参照解決をしない
+        if not value.is_a? SelfRefGlispObject then
+          return [value, step - 1]
+        end
       end
-      return [List.list(:"stack-get", index), step - 1]
+      return [StackGetGlispObject.new(index), step - 1]
     end
     exists, value, is_val = env.global.get(symbol)
     if exists then
       if level == EVAL_FINAL or is_val then
         return [value, step - 1]
       end
-      return [List.list(:"global-get", symbol), step - 1]
+      return [GlobalGetGlispObject.new(self), step - 1]
     end
     return [self, step]
   end
@@ -204,17 +239,17 @@ class ProcGlispObject < GlispObject
 end # ProcGlispObject
 
 class SelfRefGlispObject < GlispObject
+  # スタックにのみこのオブジェクトが格納され、
+  # 構文木やグローバル変数にはこのオブジェクトは格納されない。
+  # stack-get命令やシンボルの参照先が SelfRefGlispObject だった場合は、
+  # 評価してもstack-get命令のままとする。
 
-  def initialize
-    @list = nil
+  def initialize(target)
+    @target = target
   end
 
-  def target_list
-    @list
-  end
-
-  def set_target_list(target)
-    @list = target
+  def target
+    @target
   end
 
 end # SelfRefGlispObject
@@ -243,17 +278,15 @@ class ListGlispObject < GlispObject
 
   def to_ss
     a = ['(']
-    a.push(* car.to_ss)
-    a.push(* cdr.to_ss)
+    a.push(* self.to_ss_internal)
     a.push(')')
     return a
   end
 
   def to_ss_internal
-    a = ['(']
+    a = []
     a.push(* car.to_ss)
     a.push(* cdr.to_ss_internal)
-    a.push(')')
     return a
   end
 
@@ -274,11 +307,19 @@ class ListGlispObject < GlispObject
   end
 
   def car_or(default)
-    default
+    car
   end
 
   def cdr_or(default)
-    default
+    cdr
+  end
+
+  def car_or_nill
+    car_or(NilGlispObject.instance)
+  end
+
+  def cdr_or_nill
+    cdr_or(NilGlispObject.instance)
   end
 
   def length
@@ -327,7 +368,7 @@ class ListGlispObject < GlispObject
     if cdr.length == 0 then
       car
     else
-      ConsGlispObject.cons(:progn, self)
+      gl_cons(:progn, self)
     end
   end
 
@@ -353,6 +394,25 @@ class NilGlispObject < ListGlispObject
     true
   end
 
+  def car_or(default)
+    default
+  end
+
+  def cdr_or(default)
+    default
+  end
+
+  # carがシンボルの場合にRubyオブジェクトでシンボルを取得する
+  # シンボルでない場合はnilを返す
+  def car_to_sym
+    a = car_or(nil)
+    if a.is_a? SymbolGlispObject then
+      a.symbol
+    else
+      nil
+    end
+  end
+
   def length
     0
   end
@@ -370,34 +430,8 @@ end # NilGlispObject
 class ConsGlispObject < ListGlispObject
 
   def initialize(car, cdr)
-    if not car.is_a? GlispObject then
-      raise Exception, car.inspect
-    end
-    if not cdr.is_a? ListGlispObject then
-      raise Exception, cdr.inspect
-    end
-    @car = car
-    @cdr = cdr
-  end
-
-  def self.nill
-    NilGlispObject.instance
-  end
-
-  def self.cons(car, cdr)
-    self.new(car, cdr)
-  end
-
-  def self.list(*x)
-    if x.empty? then
-      NilGlispObject.instance
-    else
-      List.new(GlispObject.create(x[0]), List.list(*x[1..-1]))
-    end
-  end
-
-  def self.list2(e1, e2)
-    List.cons(GlispObject.create(e1), List.cons(GlispObject.create(e2), self.nill))
+    @car = gl_create(car)
+    @cdr = gl_create(cdr)
   end
 
   def car
@@ -408,15 +442,214 @@ class ConsGlispObject < ListGlispObject
     @cdr
   end
 
-  def car_or(default)
-    @car
+  def eval(env, stack, step, level)
+
+    sym = car_to_sym
+
+    if sym == :"stack-get" then
+      # 通常は stack-get 命令は StackGetGlispObject が生成されるはずだが、
+      # 手動で生成した場合はここで処理する
+      index = cdr_or_nill.car_or(nil)
+      if index.is_a? NumberGlispObject and index.val.is_a? Integer then
+        return StackGetGlispObject.new(index.val).eval(env, stack, step, level)
+      end
+      return [gl_list(:throw,
+                      'Stack index needs Integer, but: %s' % [index],
+                      :Exception), step - 1]
+    end
+
+    if sym == :"global-get" then
+      # 通常は global-get 命令は GlobalGetGlispObject が生成されるはずだが、
+      # 手動で生成した場合はここで処理する
+      name = cdr_or_nill.car_or(nil)
+      if name.is_a? SymbolGlispObject then
+        return GlobalGetGlispObject.new(name).eval(env, stack, step, level)
+      end
+      return [gl_list(:throw,
+                      'Global variable name needs Symbol, but: %s' % [name],
+                      :Exception), step - 1]
+    end
+
+    if sym == :car then
+      return _eval_car(env, stack, step, level)
+    end
+
+    if sym == :cdr then
+      return _eval_cdr(env, stack, step, level)
+    end
+
+    if sym == :cons then
+      return _eval_cons(env, stack, step, level)
+    end
+
+    if sym == :quote then
+      return _eval_quote(env, stack, step, level)
+    end
+
+    if sym == :unquote then
+      return eval_force.eval(env, stack, step, level)
+    end
+
+    if sym == :func then
+      # TODO
+    end
+
+    if sym == :selfref then
+      # TODO
+    end
+
+    if sym == :if then
+      # TODO
+    end
+
+    return _eval_func_call(env, stack, step, level)
+
   end
 
-  def cdr_or(default)
-    @cdr
+  def _eval_car(env, stack, step, level)
+    begin
+      [cdr.car.car, step - 1]
+    rescue
+      if cdr.car_or(nil) == nil then
+        return [gl_list(:throw,
+                        '\'Car\' needs an argument.',
+                        :Exception), step - 1]
+      else
+        return [gl_list(:throw,
+                        '\'Car\' needs list.',
+                        :Exception), step - 1]
+      end
+    end
+  end
+
+  def _eval_cdr(env, stack, step, level)
+    begin
+      [cdr.car.cdr, step - 1]
+    rescue
+      if cdr.car_or(nil) == nil then
+        return [gl_list(:throw,
+                        '\'Cdr\' needs an argument.',
+                        :Exception), step - 1]
+      else
+        return [gl_list(:throw,
+                        '\'Cdr\' needs list.',
+                        :Exception), step - 1]
+      end
+    end
+  end
+
+  def _eval_quote(env, stack, step, level)
+    _eval_quote_sub(env, stack, step, level, 0)
+  end
+
+  def _eval_quote_sub(env, stack, step, level, quote_depth)
+    sym = car_to_sym
+    value = cdr.car_or(nil)
+    if sym == :quote then
+      # eval から呼び出された最初は必ずこの分岐に入る
+      if value == nil then
+        return [gl_list(:throw,
+                        '\'Quote\' needs an argument.',
+                        :Exception), step - 1]
+      end
+      value, step = value._eval_quote_sub(env, stack, step, level, quote_depth + 1)
+      [List.list2(:quote, value), step]
+    elsif sym == :unquote then
+      if value == nil then
+        return [gl_list(:throw,
+                        '\'Unquote\' needs an argument.',
+                        :Exception), step - 1]
+      end
+      if quote_level == 1 then
+        prev_step = step
+        value, step = value.eval(env, stack, step, level)
+        return [gl_cons(:unquote, value), step] if step == 0
+        # if step == prev_step
+        [value.eval_force, step - 1]
+      else
+        value, step = value._eval_quote_sub(env, stack, step, level, quote_depth - 1)
+        [gl_cons(:quote, value), step]
+      end
+    else
+      new_car = car._eval_quote_sub(env, stack, step, level, quote_depth)
+      return [gl_cons(new_car, cdr), step] if step == 0
+      new_cdr = cdr._eval_quote_sub(env, stack, step, level, quote_depth)
+      [gl_cons(new_car, cdr), step]
+    end
+  end
+
+  def _eval_func_call(env, stack, step, level)
+    # TODO
+  end
+
+  def eval_force
+    sym = car_to_sym
+    if sym == :quote then
+      cdr_or_nill.car_or_nill
+    else
+      self
+    end
   end
 
 end # ConsGlispObject
+
+class StackGetGlispObject < ListGlispObject
+
+  @@symbolObj = SymbolGlispObject.new(:"stack-get")
+
+  # indexはRubyプリミティブの整数
+  def initialize(index)
+    @index = index
+  end
+
+  def car
+    @@symbolObj
+  end
+
+  def cdr
+    gl_cons(@index, nil)
+  end
+
+  def eval(env, stack, step, level)
+
+    # stack-get は参照先が SelfRefGlispObject だった場合は参照解決をしない
+
+    # TODO
+
+    [self, step]
+
+  end
+
+end # StackGetGlispObject
+
+class GlobalGetGlispObject < ListGlispObject
+
+  @@symbolObj = SymbolGlispObject.new(:"global-get")
+
+  # nameはGlispObject
+  def initialize(name)
+    @name = name
+  end
+
+  def car
+    @@symbolObj
+  end
+
+  def cdr
+    gl_cons(@name, nil)
+  end
+
+  def eval(env, stack, step, level)
+
+    # stack-get は参照先が SelfRefGlispObject だった場合は参照解決をしない
+
+    # TODO
+
+    [self, step]
+
+  end
+
+end # StackGetGlispObject
 
 class InterpreterEnv
 
@@ -487,9 +720,9 @@ class Reader
     when :')' then
       raise EvalException, 'unexpected: ' + t.to_s
     when :'`' then
-      return List.list(:quote, _read_expr)
+      return gl_list2(:quote, _read_expr)
     when :',' then
-      return List.list(:unquote, _read_expr)
+      return gl_list2(:unquote, _read_expr)
     when :'.' then
       raise EvalException, 'unexpected: ' + t.to_s
     else
@@ -508,7 +741,7 @@ class Reader
       _read_back(t)
       head = _read_expr
       tail = _read_list
-      return List.new(head, tail)
+      return gl_cons(head, tail)
     end
   end
 
@@ -572,7 +805,45 @@ class Reader
 
 end # Reader
 
-if __FILE__ == $PROGRAM_NAME
+def do_test
+  env = InterpreterEnv.new
+
+  do_test_sub(env, "`(a b c)",
+              '( quote ( a b c ) )')
+
+end
+
+def do_test_sub(env, str, expected_pattern)
+  expected_pattern_regexp = _test_convert_pattern(expected_pattern)
+  io = StringIO.new(str)
+  reader = Reader.new(io)
+  expr = reader.read
+  result = repl_eval_expr(expr, env).to_s
+  if not expected_pattern_regexp =~ result then
+    print "FAILED! Expected: %s\n" % [expected_pattern]
+  end
+  print "\n"
+end
+
+def _test_convert_pattern(pattern)
+  Regexp.new('^' + pattern.gsub(/\(/, '\(').gsub(/\)/, '\)').gsub(/\*/, '[^>]+') + '$')
+end
+
+def repl_eval_expr(expr, env)
+  print "expr: %s\n" % [expr.to_s]
+  STDOUT.flush
+  while true
+    expr, step = expr.eval(env, [], 1, EVAL_FINAL)
+    print "expr: %s\n" % [expr.to_s]
+    STDOUT.flush
+    if step > 0 then
+      return expr
+    end
+  end
+end
+
+if __FILE__ == $PROGRAM_NAME then
+  do_test
 end
 
 
