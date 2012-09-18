@@ -81,11 +81,19 @@ class GlispObject
     false
   end
 
+  def is_permanent
+    true
+  end
+
   def eval(env, stack, step, level)
     [self, step]
   end
 
-  # (quote ...) の場合に quote を削除する
+  def eval_quote(env, stack, step, level, quote_depth)
+    self
+  end
+
+  # (quote-all ...) の場合に quote-all を削除する
   def eval_force
     self
   end
@@ -112,6 +120,10 @@ class SymbolGlispObject < GlispObject
 
   def symbol
     @sym
+  end
+
+  def is_permanent
+    false
   end
 
   def eval(env, stack, step, level)
@@ -322,6 +334,17 @@ class ListGlispObject < GlispObject
     cdr_or(NilGlispObject.instance)
   end
 
+  # carがシンボルの場合にRubyオブジェクトでシンボルを取得する
+  # シンボルでない場合はnilを返す
+  def car_to_sym
+    a = car_or(nil)
+    if a.is_a? SymbolGlispObject then
+      a.symbol
+    else
+      nil
+    end
+  end
+
   def length
     cdr.length + 1
   end
@@ -402,17 +425,6 @@ class NilGlispObject < ListGlispObject
     default
   end
 
-  # carがシンボルの場合にRubyオブジェクトでシンボルを取得する
-  # シンボルでない場合はnilを返す
-  def car_to_sym
-    a = car_or(nil)
-    if a.is_a? SymbolGlispObject then
-      a.symbol
-    else
-      nil
-    end
-  end
-
   def length
     0
   end
@@ -427,7 +439,50 @@ class NilGlispObject < ListGlispObject
 
 end # NilGlispObject
 
-class ConsGlispObject < ListGlispObject
+class BasicConsGlispObject < ListGlispObject
+
+  def initialize
+  end
+
+  def eval_quote(env, stack, step, level, quote_depth)
+    sym = car_to_sym
+    value = cdr.car_or(nil)
+    if sym == :quote then
+      # eval から呼び出された最初は必ずこの分岐に入る
+      if value == nil then
+        return [gl_list(:throw,
+                        '\'Quote\' needs an argument.',
+                        :Exception), step - 1]
+      end
+      value, step = value.eval_quote(env, stack, step, level, quote_depth + 1)
+      [gl_list2(:quote, value), step]
+    elsif sym == :unquote then
+      if value == nil then
+        return [gl_list(:throw,
+                        '\'Unquote\' needs an argument.',
+                        :Exception), step - 1]
+      end
+      if quote_level == 1 then
+        prev_step = step
+        value, step = value.eval(env, stack, step, level)
+        return [gl_cons(:unquote, value), step] if step == 0
+        # if step == prev_step
+        [value.eval_force, step - 1]
+      else
+        value, step = value.eval_quote(env, stack, step, level, quote_depth - 1)
+        [gl_cons(:quote, value), step]
+      end
+    else
+      new_car = car.eval_quote(env, stack, step, level, quote_depth)
+      return [gl_cons(new_car, cdr), step] if step == 0
+      new_cdr = cdr.eval_quote(env, stack, step, level, quote_depth)
+      [gl_cons(new_car, cdr), step]
+    end
+  end
+
+end # BasicConsGlispObject
+
+class ConsGlispObject < BasicConsGlispObject
 
   def initialize(car, cdr)
     @car = gl_create(car)
@@ -440,6 +495,10 @@ class ConsGlispObject < ListGlispObject
 
   def cdr
     @cdr
+  end
+
+  def is_permanent
+    false
   end
 
   def eval(env, stack, step, level)
@@ -483,7 +542,11 @@ class ConsGlispObject < ListGlispObject
     end
 
     if sym == :quote then
-      return _eval_quote(env, stack, step, level)
+      return eval_quote(env, stack, step, level, 0)
+    end
+
+    if sym == :"quote-all" then
+      return [self, step]
     end
 
     if sym == :unquote then
@@ -538,54 +601,18 @@ class ConsGlispObject < ListGlispObject
     end
   end
 
-  def _eval_quote(env, stack, step, level)
-    _eval_quote_sub(env, stack, step, level, 0)
-  end
-
-  def _eval_quote_sub(env, stack, step, level, quote_depth)
-    sym = car_to_sym
-    value = cdr.car_or(nil)
-    if sym == :quote then
-      # eval から呼び出された最初は必ずこの分岐に入る
-      if value == nil then
-        return [gl_list(:throw,
-                        '\'Quote\' needs an argument.',
-                        :Exception), step - 1]
-      end
-      value, step = value._eval_quote_sub(env, stack, step, level, quote_depth + 1)
-      [List.list2(:quote, value), step]
-    elsif sym == :unquote then
-      if value == nil then
-        return [gl_list(:throw,
-                        '\'Unquote\' needs an argument.',
-                        :Exception), step - 1]
-      end
-      if quote_level == 1 then
-        prev_step = step
-        value, step = value.eval(env, stack, step, level)
-        return [gl_cons(:unquote, value), step] if step == 0
-        # if step == prev_step
-        [value.eval_force, step - 1]
-      else
-        value, step = value._eval_quote_sub(env, stack, step, level, quote_depth - 1)
-        [gl_cons(:quote, value), step]
-      end
-    else
-      new_car = car._eval_quote_sub(env, stack, step, level, quote_depth)
-      return [gl_cons(new_car, cdr), step] if step == 0
-      new_cdr = cdr._eval_quote_sub(env, stack, step, level, quote_depth)
-      [gl_cons(new_car, cdr), step]
-    end
-  end
-
   def _eval_func_call(env, stack, step, level)
     # TODO
   end
 
   def eval_force
     sym = car_to_sym
-    if sym == :quote then
-      cdr_or_nill.car_or_nill
+    if sym == :"quote-all" then
+      begin
+        cdr.car
+      rescue
+        self
+      end
     else
       self
     end
@@ -593,7 +620,7 @@ class ConsGlispObject < ListGlispObject
 
 end # ConsGlispObject
 
-class StackGetGlispObject < ListGlispObject
+class StackGetGlispObject < BasicConsGlispObject
 
   @@symbolObj = SymbolGlispObject.new(:"stack-get")
 
@@ -610,6 +637,10 @@ class StackGetGlispObject < ListGlispObject
     gl_cons(@index, nil)
   end
 
+  def is_permanent
+    false
+  end
+
   def eval(env, stack, step, level)
 
     # stack-get は参照先が SelfRefGlispObject だった場合は参照解決をしない
@@ -622,7 +653,7 @@ class StackGetGlispObject < ListGlispObject
 
 end # StackGetGlispObject
 
-class GlobalGetGlispObject < ListGlispObject
+class GlobalGetGlispObject < BasicConsGlispObject
 
   @@symbolObj = SymbolGlispObject.new(:"global-get")
 
@@ -637,6 +668,10 @@ class GlobalGetGlispObject < ListGlispObject
 
   def cdr
     gl_cons(@name, nil)
+  end
+
+  def is_permanent
+    false
   end
 
   def eval(env, stack, step, level)
@@ -809,19 +844,18 @@ def do_test
   env = InterpreterEnv.new
 
   do_test_sub(env, "`(a b c)",
-              '( quote ( a b c ) )')
+              [
+               '( quote ( a b c ) )',
+               '( quote ( a b c ) )'
+              ])
 
 end
 
-def do_test_sub(env, str, expected_pattern)
-  expected_pattern_regexp = _test_convert_pattern(expected_pattern)
+def do_test_sub(env, str, expected_patterns)
   io = StringIO.new(str)
   reader = Reader.new(io)
   expr = reader.read
-  result = repl_eval_expr(expr, env).to_s
-  if not expected_pattern_regexp =~ result then
-    print "FAILED! Expected: %s\n" % [expected_pattern]
-  end
+  _test_eval_expr(expr, env, expected_patterns)
   print "\n"
 end
 
@@ -829,16 +863,30 @@ def _test_convert_pattern(pattern)
   Regexp.new('^' + pattern.gsub(/\(/, '\(').gsub(/\)/, '\)').gsub(/\*/, '[^>]+') + '$')
 end
 
-def repl_eval_expr(expr, env)
-  print "expr: %s\n" % [expr.to_s]
-  STDOUT.flush
+def _test_eval_expr(expr, env, expected_patterns)
+  offset = 0
+  step = 0
   while true
-    expr, step = expr.eval(env, [], 1, EVAL_FINAL)
-    print "expr: %s\n" % [expr.to_s]
+
+    expr_s = expr.to_s
+    print "expr:             %s\n" % [expr_s]
+
+    pattern = expected_patterns[offset]
+    pattern_regexp = _test_convert_pattern(pattern)
+    offset = offset + 1
+    if not pattern_regexp =~ expr_s then
+      print "FAILED! Expected: %s\n" % [pattern]
+      STDOUT.flush
+      break
+    end
     STDOUT.flush
+
     if step > 0 then
       return expr
     end
+
+    expr, step = expr.eval(env, [], 1, EVAL_FINAL)
+
   end
 end
 
