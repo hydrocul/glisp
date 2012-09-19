@@ -90,7 +90,7 @@ class GlispObject
   end
 
   def eval_quote(env, stack, step, level, quote_depth)
-    self
+    [self, step]
   end
 
   # (quote-all ...) の場合に quote-all を削除する
@@ -257,7 +257,7 @@ class ProcGlispObject < GlispObject
     end
     begin
       return [gl_create(@proc.call(* args.to_list)), step - 1]
-    rescue
+    rescue => e
       return [gl_list(:throw,
                       '[%s] %s' % [e.class, e.message],
                       :Exception), step - 1]
@@ -412,10 +412,15 @@ class ListGlispObject < GlispObject
   end
 
   def eval_list_each(env, stack, step, level)
-    # TODO
+    new_car, step = car.eval(env, stack, step, level)
+    return [gl_cons(new_car, cdr), step] if step == 0
+    new_cdr, step = cdr.eval_list_each(env, stack, step, level)
+    [gl_cons(new_car, new_cdr), step]
   end
 
   def is_permanent_all
+    return false if not car.is_permanent
+    cdr.is_permanent_all
   end
 
 end # ListGlispObject
@@ -460,8 +465,17 @@ class NilGlispObject < ListGlispObject
     [false, nil]
   end
 
+  def eval_list_each(env, stack, step, level)
+    [self, step]
+  end
+
+  def is_permanent_all
+    true
+  end
+
 end # NilGlispObject
 
+# ListGlispObjectのサブクラスの中で NilGlispObject 以外のすべてで共通のスーパークラス
 class BasicConsGlispObject < ListGlispObject
 
   def initialize
@@ -478,26 +492,31 @@ class BasicConsGlispObject < ListGlispObject
                         :Exception), step - 1]
       end
       value, step = value.eval_quote(env, stack, step, level, quote_depth + 1)
-      [gl_list2(:quote, value), step]
+      return [gl_list2(:quote, value), step] if step == 0
+      if quote_depth == 0 then
+        [gl_list2(:"quote-all", value), step]
+      else
+        [gl_list2(:quote, value), step]
+      end
     elsif sym == :unquote then
       if value == nil then
         return [gl_list(:throw,
                         '\'Unquote\' needs an argument.',
                         :Exception), step - 1]
       end
-      if quote_level == 1 then
+      if quote_depth == 1 then
         prev_step = step
         value, step = value.eval(env, stack, step, level)
-        return [gl_cons(:unquote, value), step] if step == 0 or not value.is_permanent
+        return [gl_list2(:unquote, value), step] if step == 0 or not value.is_permanent
         [value.eval_force, step - 1]
       else
         value, step = value.eval_quote(env, stack, step, level, quote_depth - 1)
-        [gl_cons(:quote, value), step]
+        [gl_list2(:unquote, value), step]
       end
     else
-      new_car = car.eval_quote(env, stack, step, level, quote_depth)
+      new_car, step = car.eval_quote(env, stack, step, level, quote_depth)
       return [gl_cons(new_car, cdr), step] if step == 0
-      new_cdr = cdr.eval_quote(env, stack, step, level, quote_depth)
+      new_cdr, step = cdr.eval_quote(env, stack, step, level, quote_depth)
       [gl_cons(new_car, new_cdr), step]
     end
   end
@@ -509,6 +528,9 @@ class ConsGlispObject < BasicConsGlispObject
   def initialize(car, cdr)
     @car = gl_create(car)
     @cdr = gl_create(cdr)
+    if not @cdr.is_list then
+      raise Exception
+    end
   end
 
   def car
@@ -576,15 +598,15 @@ class ConsGlispObject < BasicConsGlispObject
     end
 
     if sym == :func then
-      # TODO
+      raise Exception, "TODO"
     end
 
     if sym == :selfref then
-      # TODO
+      raise Exception, "TODO"
     end
 
     if sym == :if then
-      # TODO
+      raise Exception, "TODO"
     end
 
     return _eval_func_call(env, stack, step, level)
@@ -638,7 +660,7 @@ class ConsGlispObject < BasicConsGlispObject
   end
 
   def _eval_lisp_func_call(env, stack, step, level)
-    # TODO
+    raise Exception, "TODO"
   end
 
   def eval_force
@@ -681,7 +703,7 @@ class StackGetGlispObject < BasicConsGlispObject
 
     # stack-get は参照先が SelfRefGlispObject だった場合は参照解決をしない
 
-    # TODO
+    raise Exception, "TODO"
 
     [self, step]
 
@@ -714,7 +736,7 @@ class GlobalGetGlispObject < BasicConsGlispObject
 
     # stack-get は参照先が SelfRefGlispObject だった場合は参照解決をしない
 
-    # TODO
+    raise Exception, "TODO"
 
     [self, step]
 
@@ -739,6 +761,9 @@ class Global
   def initialize
     @vals = {}
     @vars = {}
+    _set_basic_operator(:+, true) do |*xs|
+      xs.inject(0) {|a, b| a + b}
+    end
   end
 
   def get(symbol)
@@ -770,6 +795,15 @@ class Global
     else
       @vals[symbol] = value
     end
+  end
+
+  def _set_basic_operator(symbol, can_calc_on_compile)
+    f = proc do |*xs|
+      args = xs.map {|x| x.to_rubyObj}
+      ret = yield(*args)
+      gl_create(ret)
+    end
+    @vals[symbol] = ProcGlispObject.new(f, can_calc_on_compile)
   end
 
 end # Global
@@ -883,16 +917,22 @@ end # Reader
 def do_test
   env = InterpreterEnv.new
 
-  do_test_sub(env, "`(a b c)",
+  do_test_sub(env, "`(a b c ,(+ 2 3) `(d ,e ,,(+ 1 2)))",
               [
-               '( quote ( a b c ) )',
-               '( quote ( a b c ) )'
+               '( quote ( a b c ( unquote ( + 2 3 ) ) ( quote ( d ( unquote e ) ( unquote ( unquote ( + 1 2 ) ) ) ) ) ) )',
+               '( quote ( a b c ( unquote ( #<Proc:*> 2 3 ) ) ( quote ( d ( unquote e ) ( unquote ( unquote ( + 1 2 ) ) ) ) ) ) )',
+               '( quote ( a b c ( unquote 5 ) ( quote ( d ( unquote e ) ( unquote ( unquote ( + 1 2 ) ) ) ) ) ) )',
+               '( quote ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( unquote ( + 1 2 ) ) ) ) ) ) )',
+               '( quote ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( unquote ( #<Proc:*> 1 2 ) ) ) ) ) ) )',
+               '( quote ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( unquote 3 ) ) ) ) ) )',
+               '( quote ( a b c 5 ( quote ( d ( unquote e ) 3 ) ) ) )',
+               '( quote-all ( a b c 5 ( quote ( d ( unquote e ) 3 ) ) ) )'
               ])
 
   do_test_sub(env, "(+ 2 3)",
               [
                '( + 2 3 )',
-               '( Proc* 2 3 )',
+               '( #<Proc:*> 2 3 )',
                '5',
                '5'
               ])
