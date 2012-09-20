@@ -89,8 +89,11 @@ class GlispObject
     [self, step]
   end
 
+  # quoteの中を処理するためのメソッド
+  # 評価が完全に完了している場合に3つ目の返り値としてtrueを返す
+  # unquoteを展開した場合に4つ目の返り値としてtrueを返す
   def eval_quote(env, stack, step, level, quote_depth)
-    [self, step]
+    [self, step, true, false]
   end
 
   # (quote-all ...) の場合に quote-all を削除する
@@ -489,35 +492,38 @@ class BasicConsGlispObject < ListGlispObject
       if value == nil then
         return [gl_list(:throw,
                         '\'Quote\' needs an argument.',
-                        :Exception), step - 1]
+                        :Exception), step - 1, false, false]
       end
-      value, step = value.eval_quote(env, stack, step, level, quote_depth + 1)
-      return [gl_list2(:quote, value), step] if step == 0
-      if quote_depth == 0 then
-        [gl_list2(:"quote-all", value), step]
+      value, step, is_perm, = value.eval_quote(env, stack, step, level, quote_depth + 1)
+      return [gl_list2(:quote, value), step, false, false] if step == 0
+      if quote_depth == 0 and is_perm then
+        [gl_list2(:"quote-all", value), step, true, false]
       else
-        [gl_list2(:quote, value), step]
+        [gl_list2(:quote, value), step, false, false]
       end
     elsif sym == :unquote then
       if value == nil then
         return [gl_list(:throw,
                         '\'Unquote\' needs an argument.',
-                        :Exception), step - 1]
+                        :Exception), step - 1, false, false]
       end
       if quote_depth == 1 then
-        prev_step = step
+        if value.is_permanent then
+          [value, step - 1, true, true]
+        end
         value, step = value.eval(env, stack, step, level)
-        return [gl_list2(:unquote, value), step] if step == 0 or not value.is_permanent
-        [value.eval_force, step - 1]
+        is_perm = value.is_permanent
+        return [gl_list2(:unquote, value), step, false, false] if step == 0 or not is_perm
+        [gl_list2(:unquote, value), step, true, false]
       else
-        value, step = value.eval_quote(env, stack, step, level, quote_depth - 1)
-        [gl_list2(:unquote, value), step]
+        value, step, is_perm, = value.eval_quote(env, stack, step, level, quote_depth - 1)
+        [gl_list2(:unquote, value), step, is_perm, false]
       end
     else
-      new_car, step = car.eval_quote(env, stack, step, level, quote_depth)
-      return [gl_cons(new_car, cdr), step] if step == 0
-      new_cdr, step = cdr.eval_quote(env, stack, step, level, quote_depth)
-      [gl_cons(new_car, new_cdr), step]
+      new_car, step, is_perm1, = car.eval_quote(env, stack, step, level, quote_depth)
+      return [gl_cons(new_car, cdr), step, false, false] if step == 0
+      new_cdr, step, is_perm2, = cdr.eval_quote(env, stack, step, level, quote_depth)
+      [gl_cons(new_car, new_cdr), step, is_perm1 && is_perm2, false]
     end
   end
 
@@ -542,12 +548,7 @@ class ConsGlispObject < BasicConsGlispObject
   end
 
   def is_permanent
-    sym = car_to_sym
-    if sym == :"quote-all" then
-      true
-    else
-      false
-    end
+    false
   end
 
   def eval(env, stack, step, level)
@@ -591,7 +592,8 @@ class ConsGlispObject < BasicConsGlispObject
     end
 
     if sym == :quote then
-      return eval_quote(env, stack, step, level, 0)
+      new_expr, step, = eval_quote(env, stack, step, level, 0)
+      return [new_expr, step]
     end
 
     if sym == :"quote-all" then
@@ -922,14 +924,16 @@ end # Reader
 def do_test
   env = InterpreterEnv.new
 
-  do_test_sub(env, "`(a b c ,(+ 2 3) `(d ,e ,,`(+ 1 2)))",
+  do_test_sub(env, "`(a b c ,(+ 2 3) `(d ,e ,,(+ 1 2)))",
               [
-               '( quote ( a b c ( unquote ( + 2 3 ) ) ( quote ( d ( unquote e ) ( unquote ( unquote ( quote ( + 1 2 ) ) ) ) ) ) ) )',
-               '( quote ( a b c ( unquote ( #<Proc:*> 2 3 ) ) ( quote ( d ( unquote e ) ( unquote ( unquote ( quote ( + 1 2 ) ) ) ) ) ) ) )',
-               '( quote ( a b c ( unquote 5 ) ( quote ( d ( unquote e ) ( unquote ( unquote ( quote ( + 1 2 ) ) ) ) ) ) ) )',
-               '( quote ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( unquote ( quote ( + 1 2 ) ) ) ) ) ) ) )',
-               '( quote ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( + 1 2 ) ) ) ) ) )',
-               '( quote-all ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( + 1 2 ) ) ) ) ) )',
+               '( quote ( a b c ( unquote ( + 2 3 ) ) ( quote ( d ( unquote e ) ( unquote ( unquote ( + 1 2 ) ) ) ) ) ) )',
+               '( quote ( a b c ( unquote ( #<Proc:*> 2 3 ) ) ( quote ( d ( unquote e ) ( unquote ( unquote ( + 1 2 ) ) ) ) ) ) )',
+               '( quote ( a b c ( unquote 5 ) ( quote ( d ( unquote e ) ( unquote ( unquote ( + 1 2 ) ) ) ) ) ) )',
+               '( quote ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( unquote ( + 1 2 ) ) ) ) ) ) )',
+               '( quote ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( unquote ( #<Proc:*> 1 2 ) ) ) ) ) ) )',
+               '( quote ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( unquote 3 ) ) ) ) ) )',
+               '( quote ( a b c 5 ( quote ( d ( unquote e ) 3 ) ) ) )',
+               '( quote-all ( a b c 5 ( quote ( d ( unquote e ) 3 ) ) ) )'
               ])
 
   do_test_sub(env, "(+ 2 3)",
