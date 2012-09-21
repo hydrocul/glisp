@@ -129,11 +129,8 @@ class SymbolGlispObject < GlispObject
   def eval(env, stack, step, level)
     index, value = stack.get_by_key(self)
     if index then
-      if level == EVAL_FINAL or value != UNDEFINED then
-        # 参照先が SelfRefGlispObject だった場合は参照解決をしない
-        if not value.is_a? SelfRefGlispObject then
-          return [value, step - 1]
-        end
+      if value != UNDEFINED and not value.is_a? LazyEvalGlispObject then
+        return [value, step - 1]
       end
       return [StackGetGlispObject.new(index), step - 1]
     end
@@ -260,31 +257,12 @@ class ProcGlispObject < GlispObject
     rescue => e
       return [gl_list(:throw,
                       '[%s] %s' % [e.class, e.message],
+#                      '[%s] %s %s' % [e.class, e.message, args.to_list.inspect],
                       :Exception), step - 1]
     end
   end
 
 end # ProcGlispObject
-
-class SelfRefGlispObject < GlispObject
-  # スタックにのみこのオブジェクトが格納され、
-  # 構文木やグローバル変数にはこのオブジェクトは格納されない。
-  # stack-get命令やシンボルの参照先が SelfRefGlispObject だった場合は、
-  # 評価してもstack-get命令のままとする。
-
-  def initialize(target)
-    @target = target
-  end
-
-  def to_ss
-    raise Exception, "TODO"
-  end
-
-  def target
-    @target
-  end
-
-end # SelfRefGlispObject
 
 class LazyEvalGlispObject < GlispObject
 
@@ -306,11 +284,15 @@ class LazyEvalGlispObject < GlispObject
     false
   end
 
-  def eval(env, stack, step, level)
+  def eval_lazy(env, stack, step, level)
     new_body, step = @body.eval(env, @stack, step, level)
     @body = new_body
     return [self, step] if step == 0 or not new_body.is_permanent
     [new_body, step]
+  end
+
+  def eval(env, stack, step, level)
+    raise Exception
   end
 
   def eval_quote(env, stack, step, level, quote_depth)
@@ -669,10 +651,6 @@ class ConsGlispObject < BasicConsGlispObject
       raise Exception, "TODO"
     end
 
-    if sym == :selfref then
-      raise Exception, "TODO"
-    end
-
     if sym == :if then
       raise Exception, "TODO"
     end
@@ -777,7 +755,7 @@ class StackPushGlispObject < BasicConsGlispObject
       stack = gl_cons(gl_list2(@value, @name), stack)
     else
       lazy = LazyEvalGlispObject.new(@value, stack)
-      stack = gl_cons(gl_list2(LazyEvalGlispObject.new(@value, stack), @name), stack)
+      stack = gl_cons(gl_list2(lazy, @name), stack)
     end
 
     new_body, step = @body.eval(env, stack, step, level)
@@ -817,12 +795,26 @@ class StackGetGlispObject < BasicConsGlispObject
 
   def eval(env, stack, step, level)
 
-    # 参照先が SelfRefGlispObject だった場合は参照解決をしない
-    # 参照先が lazy-eval だった場合は評価をする
+    exists, value = stack.get_by_index(@index)
 
-    raise Exception, "TODO"
+    if not exists then
+      return [gl_list(:throw,
+                      'Stack index is out of bound: %d' % [@index],
+                      :Exception), step - 1]
+    end
 
-    [self, step]
+    value = value.car
+
+    if value.is_a? LazyEvalGlispObject then
+      # 参照先が lazy-eval だった場合は評価をする
+      value, step = value.eval_lazy(env, stack, step, level)
+      return [self, step] if step == 0 or not value.is_permanent
+      [value, step - 1]
+    elsif value == UNDEFINED then
+      [self, step]
+    else
+      [value, step - 1]
+    end
 
   end
 
@@ -850,8 +842,6 @@ class GlobalGetGlispObject < BasicConsGlispObject
   end
 
   def eval(env, stack, step, level)
-
-    # stack-get は参照先が SelfRefGlispObject だった場合は参照解決をしない
 
     raise Exception, "TODO"
 
@@ -1066,8 +1056,9 @@ def do_test
               [
                '( stack-push ( a ( + 3 4 ) ) ( + a 2 ) )',
                '( stack-push ( a ( + 3 4 ) ) ( #<Proc:*> a 2 ) )',
-               '( stack-push ( a ( #<Proc:*> 3 4 ) ) ( #<Proc:*> a 2 ) )',
-               '( stack-push ( a 7 ) ( #<Proc:*> a 2 ) )',
+               '( stack-push ( a ( + 3 4 ) ) ( #<Proc:*> ( stack-get 0 ) 2 ) )',
+               '( stack-push ( a ( #<Proc:*> 3 4 ) ) ( #<Proc:*> ( stack-get 0 ) 2 ) )',
+               '( stack-push ( a 7 ) ( #<Proc:*> ( stack-get 0 ) 2 ) )',
                '( stack-push ( a 7 ) ( #<Proc:*> 7 2 ) )',
                '( stack-push ( a 7 ) 9 )',
                '9',
