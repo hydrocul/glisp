@@ -74,7 +74,7 @@ class GlispObject
 
   # 文字列表現のもととなる文字列の配列を返す
   def to_ss
-    [inspect]
+    raise Exception # 各サブクラスで実装すべき
   end
 
   def is_list
@@ -276,11 +276,56 @@ class SelfRefGlispObject < GlispObject
     @target = target
   end
 
+  def to_ss
+    raise Exception, "TODO"
+  end
+
   def target
     @target
   end
 
 end # SelfRefGlispObject
+
+class LazyEvalGlispObject < GlispObject
+
+  def initialize(body, stack)
+    @body = body
+    @stack = stack
+  end
+
+  def to_ss
+    a = ['(', '#lazy', '(']
+    a.push(* @body.to_ss)
+    a.push(')', '(')
+    a.push(* @stack.to_ss)
+    a.push(')', ')')
+    return a
+  end
+
+  def is_permanent
+    false
+  end
+
+  def eval(env, stack, step, level)
+    new_body, step = @body.eval(env, @stack, step, level)
+    @body = new_body
+    return [self, step] if step == 0 or not new_body.is_permanent
+    [new_body, step]
+  end
+
+  def eval_quote(env, stack, step, level, quote_depth)
+    raise Exception
+  end
+
+  def eval_force
+    raise Exception
+  end
+
+  def body
+    @body
+  end
+
+end # LazyEvalGlispObject
 
 class ListGlispObject < GlispObject
 
@@ -376,13 +421,13 @@ class ListGlispObject < GlispObject
     end
   end
 
-  # ((a 1) (b 2) (c 3)) のような形式でマップを表現されたときの
-  # キーから値を取得する。
+  # ((1 a) (2 b) (3 c)) のような形式でマップを表現されたときの
+  # キーから値を取得する。各ペアの1つ目が値、2つ目がキー。
   # [インデックス, 取得した値] を返す。
   # 存在しない場合は [false, nil] を返す
   def get_by_key(key)
-    if car.car_or(nil) == key then
-      return [0, car.cdr.car]
+    if car.cdr_or_nill.car_or(nil) == key then
+      return [0, car.car]
     end
     index, value = cdr.get_by_key(key)
     if index then
@@ -492,7 +537,9 @@ class BasicConsGlispObject < ListGlispObject
                         :Exception), step - 1]
       end
       value, step = value.eval_quote(env, stack, step, level, quote_depth + 1)
-      return [gl_list2(:quote, value), step] if step == 0
+      return [gl_list2(:quote, value), step] if step == 0 or level != EVAL_FINAL
+      # TODO コンパイル時で未評価が残っている場合はこれでよいが、
+      # 評価が完了している場合にも quote-all ではなく、 quote として未評価の扱いになってしまう
       if quote_depth == 0 then
         [gl_list2(:"quote-all", value), step]
       else
@@ -554,9 +601,24 @@ class ConsGlispObject < BasicConsGlispObject
 
     sym = car_to_sym
 
+    # 以下の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
+    # 手動で生成した場合はここで処理する
+
+    if sym == :"stack-push" then
+      second = cdr_or_nill.car_or_nill
+      name = second.car_or(nil)
+      value = second.cdr_or_nill.car_or(nil)
+      body = cdr_or_nill.cdr_or_nill.car_or(nil)
+      if name.is_a? SymbolGlispObject and value != nil and body != nil then
+        return StackPushGlispObject.new(name.symbol, value, body).
+          eval(env, stack, step, level)
+      end
+      return [gl_list(:throw,
+                      'Illegal stack-push operator.',
+                      :Exception), step - 1]
+    end
+
     if sym == :"stack-get" then
-      # 通常は stack-get 命令は StackGetGlispObject が生成されるはずだが、
-      # 手動で生成した場合はここで処理する
       index = cdr_or_nill.car_or(nil)
       if index.is_a? NumberGlispObject and index.val.is_a? Integer then
         return StackGetGlispObject.new(index.val).eval(env, stack, step, level)
@@ -567,8 +629,6 @@ class ConsGlispObject < BasicConsGlispObject
     end
 
     if sym == :"global-get" then
-      # 通常は global-get 命令は GlobalGetGlispObject が生成されるはずだが、
-      # 手動で生成した場合はここで処理する
       name = cdr_or_nill.car_or(nil)
       if name.is_a? SymbolGlispObject then
         return GlobalGetGlispObject.new(name).eval(env, stack, step, level)
@@ -577,6 +637,9 @@ class ConsGlispObject < BasicConsGlispObject
                       'Global variable name needs Symbol, but: %s' % [name],
                       :Exception), step - 1]
     end
+
+    # 以上の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
+    # 手動で生成した場合はここで処理する
 
     if sym == :car then
       return _eval_car(env, stack, step, level)
@@ -652,11 +715,12 @@ class ConsGlispObject < BasicConsGlispObject
 
   def _eval_func_call(env, stack, step, level)
     new_car, step = car.eval(env, stack, step, level)
-    return [gl_cons(new_car, cdr), step] if step == 0
-    if new_car.is_a? ProcGlispObject then
-      return new_car.eval_func_call(cdr, env, stack, step, level)
-    elsif new_car.is_a? ListGlispObject then
-      return _eval_lisp_func_call(env, stack, step, level)
+    return [gl_cons(new_car, cdr), step] if step == 0 or not new_car.is_permanent
+    f = new_car.eval_force
+    if f.is_a? ProcGlispObject then
+      return f.eval_func_call(cdr, env, stack, step, level)
+    elsif f.is_a? ListGlispObject then
+      return f._eval_lisp_func_call(env, stack, step, level)
     else
       return [gl_list(:throw,
                       'Not function.',
@@ -683,6 +747,53 @@ class ConsGlispObject < BasicConsGlispObject
 
 end # ConsGlispObject
 
+class StackPushGlispObject < BasicConsGlispObject
+
+  @@symbolObj = SymbolGlispObject.new(:"stack-push")
+
+  # nameはRubyプリミティブのシンボル
+  def initialize(name, value, body)
+    @name = name
+    @value = value
+    @body = body
+  end
+
+  def car
+    @@symbolObj
+  end
+
+  def cdr
+    gl_list2(gl_list2(@name, @value), @body)
+  end
+
+  def is_permanent
+    false
+  end
+
+  def eval(env, stack, step, level)
+
+    if @value.is_permanent then
+      lazy = nil
+      stack = gl_cons(gl_list2(@value, @name), stack)
+    else
+      lazy = LazyEvalGlispObject.new(@value, stack)
+      stack = gl_cons(gl_list2(LazyEvalGlispObject.new(@value, stack), @name), stack)
+    end
+
+    new_body, step = @body.eval(env, stack, step, level)
+    if lazy == nil then
+      new_value = @value
+    else
+      new_value = lazy.body
+    end
+    return [StackPushGlispObject.new(@name, new_value, new_body),
+            step]  if step == 0 or not new_body.is_permanent
+    [new_body, step - 1]
+
+  end
+
+end # StackPushGlispObject
+
 class StackGetGlispObject < BasicConsGlispObject
 
   @@symbolObj = SymbolGlispObject.new(:"stack-get")
@@ -706,7 +817,8 @@ class StackGetGlispObject < BasicConsGlispObject
 
   def eval(env, stack, step, level)
 
-    # stack-get は参照先が SelfRefGlispObject だった場合は参照解決をしない
+    # 参照先が SelfRefGlispObject だった場合は参照解決をしない
+    # 参照先が lazy-eval だった場合は評価をする
 
     raise Exception, "TODO"
 
@@ -938,6 +1050,28 @@ def do_test
                '( #<Proc:*> 2 3 )',
                '5',
                '5'
+              ])
+
+  do_test_sub(env, "(stack-push (a 1) (+ a 2))",
+              [
+               '( stack-push ( a 1 ) ( + a 2 ) )',
+               '( stack-push ( a 1 ) ( #<Proc:*> a 2 ) )',
+               '( stack-push ( a 1 ) ( #<Proc:*> 1 2 ) )',
+               '( stack-push ( a 1 ) 3 )',
+               '3',
+               '3'
+              ])
+
+  do_test_sub(env, "(stack-push (a (+ 3 4)) (+ a 2))",
+              [
+               '( stack-push ( a ( + 3 4 ) ) ( + a 2 ) )',
+               '( stack-push ( a ( + 3 4 ) ) ( #<Proc:*> a 2 ) )',
+               '( stack-push ( a ( #<Proc:*> 3 4 ) ) ( #<Proc:*> a 2 ) )',
+               '( stack-push ( a 7 ) ( #<Proc:*> a 2 ) )',
+               '( stack-push ( a 7 ) ( #<Proc:*> 7 2 ) )',
+               '( stack-push ( a 7 ) 9 )',
+               '9',
+               '9'
               ])
 
 end
