@@ -85,6 +85,10 @@ class GlispObject
     true
   end
 
+  def to_boolean
+    true
+  end
+
   def eval(env, stack, step, level)
     [self, step]
   end
@@ -210,6 +214,10 @@ class BooleanGlispObject < GlispObject
 
   def to_ss
     [@val.inspect]
+  end
+
+  def to_boolean
+    @val
   end
 
   def val
@@ -468,6 +476,10 @@ class NilGlispObject < ListGlispObject
     return []
   end
 
+  def to_boolean
+    false
+  end
+
   def is_nil
     true
   end
@@ -652,7 +664,7 @@ class ConsGlispObject < BasicConsGlispObject
     end
 
     if sym == :if then
-      raise Exception, "TODO"
+      return _eval_if(env, stack, step, level)
     end
 
     return _eval_func_call(env, stack, step, level)
@@ -708,6 +720,29 @@ class ConsGlispObject < BasicConsGlispObject
 
   def _eval_lisp_func_call(env, stack, step, level)
     raise Exception, "TODO"
+  end
+
+  def _eval_if(env, stack, step, level)
+
+    cond      = cdr_or_nill.car_or(nil)
+    then_expr = cdr_or_nill.cdr_or_nill.car_or(nil)
+    else_expr = cdr_or_nill.cdr_or_nill.cdr_or_nill.car_or(nil)
+
+    if cond == nil then
+      return [gl_list(:throw,
+                      'Illegal if operator.',
+                      :Exception), step - 1]
+    end
+
+    cond, step = cond.eval(env, stack, step, level)
+    return [gl_list(:if, cond, then_expr, else_expr), step] if step == 0
+
+    if cond.to_boolean then
+      [then_expr, step - 1]
+    else
+      [else_expr, step - 1]
+    end
+
   end
 
   def eval_force
@@ -868,8 +903,13 @@ class Global
   def initialize
     @vals = {}
     @vars = {}
+    _set_basic_object(:true, true)
+    _set_basic_object(:false, false)
     _set_basic_operator(:+, true) do |*xs|
       xs.inject(0) {|a, b| a + b}
+    end
+    _set_basic_operator(:-, true) do |x, y|
+      x - y
     end
   end
 
@@ -902,6 +942,10 @@ class Global
     else
       @vals[symbol] = value
     end
+  end
+
+  def _set_basic_object(symbol, obj)
+    @vals[symbol] = gl_create(obj)
   end
 
   def _set_basic_operator(symbol, can_calc_on_compile)
@@ -980,6 +1024,10 @@ class Reader
       token = t.to_sym
     when 'nil' then
       token = nil
+    when 'true' then
+      token = true
+    when 'false' then
+      token = false
     when /\A\".*\"\z/ then
       token = t[1..-2]
     else
@@ -1063,6 +1111,15 @@ def do_test
                '( stack-push ( a 7 ) 9 )',
                '9',
                '9'
+              ])
+
+  do_test_sub(env, "(if false (/ 1 0) (- 3 1))",
+              [
+               '( if false ( / 1 0 ) ( - 3 1 ) )',
+               '( - 3 1 )',
+               '( #<Proc:*> 3 1 )',
+               '2',
+               '2'
               ])
 
 end
