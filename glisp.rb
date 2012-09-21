@@ -89,6 +89,10 @@ class GlispObject
     true
   end
 
+  def is_undefined
+    false
+  end
+
   def eval(env, stack, step, level)
     [self, step]
   end
@@ -130,10 +134,14 @@ class SymbolGlispObject < GlispObject
     false
   end
 
+  def is_undefined
+    @sym == UNDEFINED
+  end
+
   def eval(env, stack, step, level)
     index, value = stack.get_by_key(self)
     if index then
-      if value != UNDEFINED and not value.is_a? LazyEvalGlispObject then
+      if not value.is_undefined and not value.is_a? LazyEvalGlispObject then
         return [value, step - 1]
       end
       return [StackGetGlispObject.new(index), step - 1]
@@ -660,7 +668,7 @@ class ConsGlispObject < BasicConsGlispObject
     end
 
     if sym == :func then
-      raise Exception, "TODO"
+      return _eval_func_def(env, stack, step, level)
     end
 
     if sym == :if then
@@ -671,6 +679,7 @@ class ConsGlispObject < BasicConsGlispObject
 
   end
 
+  # carが :car の場合に eval から呼び出される
   def _eval_car(env, stack, step, level)
     begin
       [cdr.car.car, step - 1]
@@ -687,6 +696,7 @@ class ConsGlispObject < BasicConsGlispObject
     end
   end
 
+  # carが :cdr の場合に eval から呼び出される
   def _eval_cdr(env, stack, step, level)
     begin
       [cdr.car.cdr, step - 1]
@@ -722,11 +732,10 @@ class ConsGlispObject < BasicConsGlispObject
     raise Exception, "TODO"
   end
 
+  # carが :if の場合に eval から呼び出される
   def _eval_if(env, stack, step, level)
 
     cond      = cdr_or_nill.car_or(nil)
-    then_expr = cdr_or_nill.cdr_or_nill.car_or(nil)
-    else_expr = cdr_or_nill.cdr_or_nill.cdr_or_nill.car_or(nil)
 
     if cond == nil then
       return [gl_list(:throw,
@@ -735,14 +744,50 @@ class ConsGlispObject < BasicConsGlispObject
     end
 
     cond, step = cond.eval(env, stack, step, level)
-    return [gl_list(:if, cond, then_expr, else_expr), step] if step == 0
+    return [gl_cons(:if, gl_cons(cond, cdr_or_nill.cdr_or_nill)), step] if step == 0
 
     if cond.to_boolean then
-      [then_expr, step - 1]
+      begin
+        then_expr = cdr_or_nill.cdr_or_nill.car
+        [then_expr, step - 1]
+      rescue
+        return [gl_list(:throw,
+                        'Illegal if operator.',
+                        :Exception), step - 1]
+      end
     else
-      [else_expr, step - 1]
+      begin
+        else_expr = cdr_or_nill.cdr_or_nill.cdr_or_nill.car
+        [else_expr, step - 1]
+      rescue
+        return [gl_list(:throw,
+                        'Illegal if operator.',
+                        :Exception), step - 1]
+      end
     end
 
+  end
+
+  def _eval_func_def(env, stack, step, level)
+
+    vargs = cdr_or_nill.car_or(nil)
+    body = cdr_or_nill.cdr_or_nill.car_or(nil)
+
+    stack = _push_vargs_to_stack(stack, vargs)
+
+    prev_step = step
+    body, step = body.eval(env, stack, step, EVAL_FUNCTION_DEFINITION)
+    [gl_list(:func, vargs, body), step]
+
+  end
+
+  def _push_vargs_to_stack(stack, vargs)
+    a = vargs.car_or(nil)
+    if a == nil then
+      return stack
+    end
+    stack = _push_vargs_to_stack(stack, vargs.cdr)
+    gl_cons(gl_list2(UNDEFINED, a), stack)
   end
 
   def eval_force
@@ -845,7 +890,7 @@ class StackGetGlispObject < BasicConsGlispObject
       value, step = value.eval_lazy(env, stack, step, level)
       return [self, step] if step == 0 or not value.is_permanent
       [value, step - 1]
-    elsif value == UNDEFINED then
+    elsif value.is_undefined then
       [self, step]
     else
       [value, step - 1]
@@ -910,6 +955,15 @@ class Global
     end
     _set_basic_operator(:-, true) do |x, y|
       x - y
+    end
+    _set_basic_operator(:*, true) do |*xs|
+      xs.inject(1) {|a, b| a * b}
+    end
+    _set_basic_operator(:/, true) do |x, y|
+      x / y
+    end
+    _set_basic_operator(:%, true) do |x, y|
+      x % y
     end
   end
 
@@ -1087,17 +1141,22 @@ def do_test
                '( + 2 3 )',
                '( #<Proc:*> 2 3 )',
                '5',
-               '5'
+               '5',
               ])
 
-  do_test_sub(env, "(stack-push (a 1) (+ a 2))",
+  do_test_sub(env, "(stack-push (a 1) (* (+ a 2) (+ a 3)))",
               [
-               '( stack-push ( a 1 ) ( + a 2 ) )',
-               '( stack-push ( a 1 ) ( #<Proc:*> a 2 ) )',
-               '( stack-push ( a 1 ) ( #<Proc:*> 1 2 ) )',
-               '( stack-push ( a 1 ) 3 )',
-               '3',
-               '3'
+               '( stack-push ( a 1 ) ( * ( + a 2 ) ( + a 3 ) ) )',
+               '( stack-push ( a 1 ) ( #<Proc:*> ( + a 2 ) ( + a 3 ) ) )',
+               '( stack-push ( a 1 ) ( #<Proc:*> ( #<Proc:*> a 2 ) ( + a 3 ) ) )',
+               '( stack-push ( a 1 ) ( #<Proc:*> ( #<Proc:*> 1 2 ) ( + a 3 ) ) )',
+               '( stack-push ( a 1 ) ( #<Proc:*> 3 ( + a 3 ) ) )',
+               '( stack-push ( a 1 ) ( #<Proc:*> 3 ( #<Proc:*> a 3 ) ) )',
+               '( stack-push ( a 1 ) ( #<Proc:*> 3 ( #<Proc:*> 1 3 ) ) )',
+               '( stack-push ( a 1 ) ( #<Proc:*> 3 4 ) )',
+               '( stack-push ( a 1 ) 12 )',
+               '12',
+               '12',
               ])
 
   do_test_sub(env, "(stack-push (a (+ 3 4)) (+ a 2))",
@@ -1110,16 +1169,26 @@ def do_test
                '( stack-push ( a 7 ) ( #<Proc:*> 7 2 ) )',
                '( stack-push ( a 7 ) 9 )',
                '9',
-               '9'
+               '9',
               ])
 
-  do_test_sub(env, "(if false (/ 1 0) (- 3 1))",
+  do_test_sub(env, "(if false (/ 1 0) (car (3 1)))",
               [
-               '( if false ( / 1 0 ) ( - 3 1 ) )',
-               '( - 3 1 )',
-               '( #<Proc:*> 3 1 )',
-               '2',
-               '2'
+               '( if false ( / 1 0 ) ( car ( 3 1 ) ) )',
+               '( car ( 3 1 ) )',
+               '3',
+               '3',
+              ])
+
+  do_test_sub(env, "(func (a b) (+ (* a a) b))",
+              [
+               '( func ( a b ) ( + ( * a a ) b ) )',
+               '( func ( a b ) ( #<Proc:*> ( * a a ) b ) )',
+               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> a a ) b ) )',
+               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) a ) b ) )',
+               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 0 ) ) b ) )',
+               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 0 ) ) ( stack-get 1 ) ) )',
+               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 0 ) ) ( stack-get 1 ) ) )',
               ])
 
 end
