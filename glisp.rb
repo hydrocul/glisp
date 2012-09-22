@@ -145,17 +145,19 @@ class SymbolGlispObject < GlispObject
   def eval(env, stack, step, level)
     index, value = stack.get_by_key(self)
     if index then
-      if not value.is_undefined and not value.is_lazy then
+      if value.is_lazy or value.is_undefined then
+        return [StackGetGlispObject.new(index), step - 1]
+      else
         return [value, step - 1]
       end
-      return [StackGetGlispObject.new(index), step - 1]
     end
     exists, value, is_val = env.global.get(symbol)
     if exists then
-      if level == EVAL_FINAL or is_val then
+      if level != EVAL_FINAL and not is_val then
+        return [GlobalGetGlispObject.new(self), step - 1]
+      else
         return [value, step - 1]
       end
-      return [GlobalGetGlispObject.new(self), step - 1]
     end
     return [self, step]
   end
@@ -268,16 +270,13 @@ class ProcGlispObject < GlispObject
   def eval_func_call(args, env, stack, step, level)
     args, step = args.eval_list_each(env, stack, step, level)
     return [gl_cons(self, args), step] if step == 0
-    if level != EVAL_FINAL and
-        (not can_calc_on_compile or not args.is_permanent_all) then
-      return [gl_cons(self, args), step]
-    end
+    return [gl_cons(self, args), step] if not args.is_permanent_all
+    return [gl_cons(self, args), step] if level != EVAL_FINAL and not can_calc_on_compile
     begin
       return [gl_create(@proc.call(* args.to_list)), step - 1]
     rescue => e
       return [gl_list(:throw,
                       '[%s] %s' % [e.class, e.message],
-#                      '[%s] %s %s' % [e.class, e.message, args.to_list.inspect],
                       :Exception), step - 1]
     end
   end
