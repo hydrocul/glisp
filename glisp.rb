@@ -794,6 +794,7 @@ class ConsGlispObject < BasicConsGlispObject
     return [gl_list(:func, vargs, body), step, false] if step == 0
     return [body, step - 1, true] if completed
     return [gl_list(:func, vargs, body), step, true]
+
   end
 
   def _push_vargs_to_stack(stack, vargs)
@@ -1055,7 +1056,7 @@ class Reader
     when :'.' then
       raise EvalException, 'unexpected: ' + t.to_s
     else
-      return t
+      return gl_create(t)
     end
   end
 
@@ -1141,6 +1142,18 @@ end # Reader
 def do_test
   env = InterpreterEnv.new
 
+  do_test_sub(env, "1",
+              [
+               '1',
+              ])
+
+  do_test_sub(env, "(+ 2 3)",
+              [
+               '( + 2 3 )',
+               '( #<Proc:*> 2 3 )',
+               '5',
+              ])
+
   do_test_sub(env, "`(a b c ,(+ 2 3))",
               [
                '( quote ( a b c ( unquote ( + 2 3 ) ) ) )',
@@ -1210,6 +1223,7 @@ def do_test_sub(env, str, expected_patterns)
   reader = Reader.new(io)
   expr = reader.read
   _test_eval_expr(expr, env, expected_patterns)
+  _test_eval_expr2(expr, env, expected_patterns)
   print "\n"
 end
 
@@ -1221,11 +1235,11 @@ end
 def _test_eval_expr(expr, env, expected_patterns)
   offset = 0
   step = 0
-  completed = false
+  completed = expr.is_permanent
   while true
 
     expr_s = expr.to_s
-    print "expr:             %s\n" % [expr_s]
+    print "%d expr:           %s\n" % [offset, expr_s]
 
     if offset >= expected_patterns.length then
       print "FAILED! Too much!\n"
@@ -1248,6 +1262,30 @@ def _test_eval_expr(expr, env, expected_patterns)
 
   end
   STDOUT.flush
+end
+
+def _test_eval_expr2(expr, env, expected_patterns)
+
+  expr, step, completed = expr.eval(env, gl_create([]), -1, EVAL_FINAL)
+
+  expr_s = expr.to_s
+  pattern = expected_patterns[-1]
+  pattern_regexp = _test_convert_pattern(pattern)
+  if not pattern_regexp =~ expr_s then
+    print "(total) FAILED! Expected: %s\n                     but: %s\n" % [pattern, expr_s]
+    return
+  end
+
+  if not completed then
+    print "(total) FAILED! step = %d; completed = false\n" % [step]
+    return
+  end
+
+  if step != (- expected_patterns.length) then
+    print "(total) FAILED! step = %d\n" % [step]
+    return
+  end
+
 end
 
 if __FILE__ == $PROGRAM_NAME then
