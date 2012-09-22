@@ -24,11 +24,11 @@ def gl_create(rubyObj)
 =begin
   elsif rubyObj.is_a? Float then
     NumberGlispObject.new(rubyObj)
+=end
   elsif rubyObj == false or rubyObj == true then
     BooleanGlispObject.new(rubyObj)
   elsif rubyObj.is_a? Proc then
-    ProcGlispObject.new(rubyObj)
-=end
+    ProcGlispObject.new(rubyObj, false, nil)
   elsif rubyObj.is_a? Array then
     _gl_createList(rubyObj, 0)
   elsif rubyObj == nil then
@@ -69,6 +69,8 @@ end
 # クラス階層図
 # GlispObject
 #   IntegerGlispObject
+#   BooleanGlispObject
+#   ProcGlispObject
 #   ListGlispObject
 #     NilGlispObject
 #     ConsGlispObject
@@ -368,7 +370,6 @@ class IntegerGlispObject < GlispObject
 
 end # IntegerGlispObject
 
-=begin
 class BooleanGlispObject < GlispObject
 
   def initialize(val)
@@ -391,17 +392,14 @@ class BooleanGlispObject < GlispObject
     @val
   end
 
-  def val
-    @val
-  end
-
 end # BooleanGlispObject
 
 class ProcGlispObject < GlispObject
 
-  def initialize(proc, can_calc_on_compile)
+  def initialize(proc, can_calc_on_compile, name)
     @proc = proc
     @can_calc_on_compile = can_calc_on_compile
+    @name = name
   end
 
   def ==(other)
@@ -413,7 +411,11 @@ class ProcGlispObject < GlispObject
   end
 
   def to_ss
-    [@proc.inspect]
+    if @name then
+      ['#<Proc:' + @name + '>']
+    else
+      [@proc.inspect]
+    end
   end
 
   def proc
@@ -424,6 +426,7 @@ class ProcGlispObject < GlispObject
     @can_calc_on_compile
   end
 
+=begin
   def eval_func_call(args, env, stack, step, level)
     args, step, completed = args.eval_list_each(env, stack, step, level)
     return [gl_cons(self, args), step, false] if step == 0 or not completed
@@ -436,9 +439,11 @@ class ProcGlispObject < GlispObject
                       :Exception), step - 1, true]
     end
   end
+=end
 
 end # ProcGlispObject
 
+=begin
 class LazyEvalGlispObject < GlispObject
 
   def initialize(body, stack)
@@ -1383,6 +1388,11 @@ def do_test
                '1',
               ])
 
+  do_test_sub(env, "true",
+              [
+               'true',
+              ])
+
   do_test_sub(env, "(+ 2 3)",
               [
                '( + 2 3 )',
@@ -1575,18 +1585,13 @@ end
 
 def _test_eval_expr2(expr, env, expected_patterns)
 
-  expr, step, completed = expr.eval(env, gl_create([]), -1, EVAL_FINAL)
+  expr, step = expr.eval(env, gl_create([]), -1, EVAL_FINAL)
 
   expr_s = _test_convert_expr(expr)
   pattern = expected_patterns[-1]
   pattern_regexp = _test_convert_pattern(pattern)
   if not pattern_regexp =~ expr_s then
     print "(total)\nFAILED! Expected: %s\n             but: %s\n" % [pattern, expr_s]
-    return
-  end
-
-  if not completed then
-    print "(total)\nFAILED! step = %d; completed = false\n" % [step]
     return
   end
 
