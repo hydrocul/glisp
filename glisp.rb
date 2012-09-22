@@ -152,7 +152,14 @@ class SymbolGlispObject < GlispObject
   def eval(env, stack, step, level)
     index, value = stack.get_by_key(self)
     if index then
-      if value.is_lazy or value.is_undefined then
+      if value.is_lazy then
+        # 参照先が lazy だった場合は評価をする
+        step = step - 1
+        return [StackGetGlispObject.new(index), step, false] if step == 0
+        value, step, completed = value.eval_lazy(env, stack, step, level)
+        return [StackGetGlispObject.new(index), step, false] if step == 0 or not completed
+        return [value, step - 1, true]
+      elsif value.is_undefined then
         return [StackGetGlispObject.new(index), step - 1, false]
       else
         return [value, step - 1, true]
@@ -553,7 +560,7 @@ class BasicConsGlispObject < ListGlispObject
       end
       value, step, completed = value.eval_quote(env, stack, step, level, quote_depth + 1)
       return [gl_list2(:quote, value), step, false] if step == 0 or not completed
-      return [gl_list2(:"quote-all", value), step - 1, true] if quote_depth == 0
+      return [value, step - 1, true] if quote_depth == 0
       return [gl_list2(:quote, value), step, true]
     elsif sym == :unquote then
       if value == nil then
@@ -668,7 +675,7 @@ class ConsGlispObject < BasicConsGlispObject
     end
 
     if sym == :"quote-all" then
-      return [eval_force, step, true]
+      return _eval_quote_all(env, stack, step, level)
     end
 
     if sym == :unquote then
@@ -720,6 +727,16 @@ class ConsGlispObject < BasicConsGlispObject
                         '\'Cdr\' needs list.',
                         :Exception), step - 1, true]
       end
+    end
+  end
+
+  def _eval_quote_all(env, stack, step, level)
+    begin
+      [cdr.car, step - 1, true]
+    rescue
+      return [gl_list(:throw,
+                      'Illegal quote-all operator.',
+                      :Exception), step - 1, true]
     end
   end
 
@@ -902,9 +919,9 @@ class StackGetGlispObject < BasicConsGlispObject
     value = value.car
 
     if value.is_lazy then
-      # 参照先が lazy-eval だった場合は評価をする
+      # 参照先が lazy だった場合は評価をする
       value, step, completed = value.eval_lazy(env, stack, step, level)
-      return [self, step] if step == 0 or not completed
+      return [self, step, false] if step == 0 or not completed
       [value, step - 1, true]
     elsif value.is_undefined then
       [self, step, false]
@@ -1160,7 +1177,7 @@ def do_test
                '( quote ( a b c ( unquote ( #<Proc:*> 2 3 ) ) ) )',
                '( quote ( a b c ( unquote 5 ) ) )',
                '( quote ( a b c 5 ) )',
-               '( quote-all ( a b c 5 ) )',
+               '( a b c 5 )',
               ])
 
   do_test_sub(env, "`(a `(b ,,(+ 2 3)))",
@@ -1169,7 +1186,7 @@ def do_test
                '( quote ( a ( quote ( b ( unquote ( unquote ( #<Proc:*> 2 3 ) ) ) ) ) ) )',
                '( quote ( a ( quote ( b ( unquote ( unquote 5 ) ) ) ) ) )',
                '( quote ( a ( quote ( b ( unquote 5 ) ) ) ) )',
-               '( quote-all ( a ( quote ( b ( unquote 5 ) ) ) ) )',
+               '( a ( quote ( b ( unquote 5 ) ) ) )',
               ])
 
   do_test_sub(env, "(stack-push (a 1) (* (+ a 2) (+ a 3)))",
@@ -1272,17 +1289,17 @@ def _test_eval_expr2(expr, env, expected_patterns)
   pattern = expected_patterns[-1]
   pattern_regexp = _test_convert_pattern(pattern)
   if not pattern_regexp =~ expr_s then
-    print "(total) FAILED! Expected: %s\n                     but: %s\n" % [pattern, expr_s]
+    print "(total)\nFAILED! Expected: %s\n             but: %s\n" % [pattern, expr_s]
     return
   end
 
   if not completed then
-    print "(total) FAILED! step = %d; completed = false\n" % [step]
+    print "(total)\nFAILED! step = %d; completed = false\n" % [step]
     return
   end
 
   if step != (- expected_patterns.length) then
-    print "(total) FAILED! step = %d\n" % [step]
+    print "(total)\nFAILED! step = %d\n" % [step]
     return
   end
 
