@@ -28,28 +28,25 @@ def gl_create(rubyObj)
     BooleanGlispObject.new(rubyObj)
   elsif rubyObj.is_a? Proc then
     ProcGlispObject.new(rubyObj)
+=end
   elsif rubyObj.is_a? Array then
     _gl_createList(rubyObj, 0)
   elsif rubyObj == nil then
-    gl_nill
-=end
+    gl_nil
   else
     raise Exception, rubyObj.inspect
   end
 end
 
-=begin
 def _gl_createList(arrayRubyObj, offset)
   if offset == arrayRubyObj.length then
-    gl_nill
+    gl_nil
   else
     gl_cons(arrayRubyObj[offset], _gl_createList(arrayRubyObj, offset + 1))
   end
 end
-=end
 
 def gl_nil
-  raise Exception, "TODO"
   NilGlispObject.instance
 end
 
@@ -74,15 +71,21 @@ end
 # クラス階層図
 # GlispObject
 #   IntegerGlispObject
+#   ListGlispObject
+#     NilGlispObject
 
 class GlispObject
 
   def ==(other)
-    raise Exception # 各サブクラスで実装すべき
+    raise Exception
+    # 各サブクラスで再実装している
+    # ただし、ListGlispObject のサブクラスでは再実装していない
   end
 
   def to_rubyObj
-    self
+    raise Exception
+    # 各サブクラスで再実装している
+    # ただし、ListGlispObject のサブクラスでは再実装していない
   end
 
   def to_s
@@ -91,19 +94,29 @@ class GlispObject
 
   # 文字列表現のもととなる文字列の配列を返す
   def to_ss
-    raise Exception # 各サブクラスで実装すべき
+    raise Exception
+    # 各サブクラスで再実装している
+    # ただし、ListGlispObject のサブクラスのうち NilGlispObject 以外では再実装していない
+  end
+
+  def to_ss_internal
+    raise Exception
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
   def is_list
     false
+    # ListGlispObject で再実装している
   end
 
   def is_nil
     raise Exception
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
   def to_boolean
     true
+    # NilGlispObject で再実装している
   end
 
   def is_integer
@@ -140,26 +153,41 @@ class GlispObject
 
   def length
     raise Exception
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
   def car
     raise Exception
+    # ListGlispObject のサブクラスのうち NilGlispObject 以外で再実装している
   end
 
   def cdr
     raise Exception
+    # ListGlispObject のサブクラスのうち NilGlispObject 以外で再実装している
   end
 
   def car_or(default)
     default
   end
 
+  def car_symbol
+    car_or(gl_nil).symbol_or(nil)
+  end
+
   def cdr_or(default)
     default
   end
 
-  def cadr
-    cdr.car
+  def caar
+    car_or(gl_nil).car
+  end
+
+  def caar_or(default)
+    car_or(gl_nil).car_or(default)
+  end
+
+  def cadar_or(default)
+    car_or(gl_nil).cdr_or(gl_nil).car_or(default)
   end
 
   def cadr_or(default)
@@ -173,6 +201,7 @@ class GlispObject
   # [存在するかどうかの論理値, 取得した値] を返す
   def get_by_index(index)
     [false, nil]
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
   # ((1 a) (2 b) (3 c)) のような形式でマップを表現されたときの
@@ -181,23 +210,26 @@ class GlispObject
   # 存在しない場合は [false, nil] を返す
   def get_by_key(key)
     [false, nil]
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
   # Rubyの配列に変換する
   def to_list
     raise Exception
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
   def is_permanent
     true
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
-  # (expr ...) の場合に expr を削除する
+  # (evalresult ...) の場合に evalresult を削除する
   def decode
     self
   end
 
-  # is_permanent でない場合に expr をつける
+  # is_permanent でない場合に evalresult をつける
   def encode
     self
   end
@@ -454,22 +486,15 @@ class LazyEvalGlispObject < GlispObject
   end
 
 end # LazyEvalGlispObject
+=end
 
 class ListGlispObject < GlispObject
 
   def ==(other)
-    if not other.is_a? ListGlispObject then
-      return false
-    end
-    if other.is_nil and self.is_nil then
-      return true
-    end
-    if other.is_nil or self.is_nil then
-      return false
-    end
-    if other.car != self.car then
-      return false
-    end
+    return false if not other.is_list
+    return true if other.is_nil and self.is_nil
+    return false if other.is_nil or self.is_nil
+    return false if other.car != self.car
     return self.cdr == other.cdr
   end
 
@@ -499,46 +524,10 @@ class ListGlispObject < GlispObject
     false
   end
 
-  def car
-    raise Exception
-  end
-
-  def cdr
-    raise Exception
-  end
-
-  def car_or(default)
-    car
-  end
-
-  def cdr_or(default)
-    cdr
-  end
-
-  def car_or_nill
-    car_or(NilGlispObject.instance)
-  end
-
-  def cdr_or_nill
-    cdr_or(NilGlispObject.instance)
-  end
-
-  # carがシンボルの場合にRubyオブジェクトでシンボルを取得する
-  # シンボルでない場合はnilを返す
-  def car_to_sym
-    a = car_or(nil)
-    if a.is_symbol then
-      a.symbol
-    else
-      nil
-    end
-  end
-
   def length
     cdr.length + 1
   end
 
-  # [存在するかどうかの論理値, 取得した値] を返す
   def get_by_index(index)
     if index == 0 then
       [true, car]
@@ -549,13 +538,9 @@ class ListGlispObject < GlispObject
     end
   end
 
-  # ((1 a) (2 b) (3 c)) のような形式でマップを表現されたときの
-  # キーから値を取得する。各ペアの1つ目が値、2つ目がキー。
-  # [インデックス, 取得した値] を返す。
-  # 存在しない場合は [false, nil] を返す
   def get_by_key(key)
-    if car.cdr_or_nill.car_or(nil) == key then
-      return [0, car.car]
+    if cadar_or(nil) == key then
+      return [0, caar]
     end
     index, value = cdr.get_by_key(key)
     if index then
@@ -565,7 +550,6 @@ class ListGlispObject < GlispObject
     end
   end
 
-  # Rubyの配列に変換する
   def to_list
     list = self
     args = []
@@ -576,6 +560,22 @@ class ListGlispObject < GlispObject
     args
   end
 
+  def is_permanent
+    car_symbol == :evalresult
+  end
+
+  def decode
+    if car_symbol != :evalresult then
+      raise Exception
+    end
+    cdr
+  end
+
+  def encode
+    gl_cons(:evalresult, self)
+  end
+
+=begin
   def body_to_simple
     if cdr.length == 0 then
       car
@@ -595,6 +595,7 @@ class ListGlispObject < GlispObject
     return false if not car.is_permanent
     cdr.is_permanent_all
   end
+=end
 
 end # ListGlispObject
 
@@ -614,20 +615,12 @@ class NilGlispObject < ListGlispObject
     return []
   end
 
-  def to_boolean
-    false
-  end
-
   def is_nil
     true
   end
 
-  def car_or(default)
-    default
-  end
-
-  def cdr_or(default)
-    default
+  def to_boolean
+    false
   end
 
   def length
@@ -642,6 +635,23 @@ class NilGlispObject < ListGlispObject
     [false, nil]
   end
 
+  def to_list
+    []
+  end
+
+  def is_permanent
+    true
+  end
+
+  def decode
+    self
+  end
+
+  def encode
+    self
+  end
+
+=begin
   def eval_list_each(env, stack, step, level)
     [self, step, true]
   end
@@ -649,9 +659,11 @@ class NilGlispObject < ListGlispObject
   def is_permanent_all
     true
   end
+=end
 
 end # NilGlispObject
 
+=begin
 # ListGlispObjectのサブクラスの中で NilGlispObject 以外のすべてで共通のスーパークラス
 class BasicConsGlispObject < ListGlispObject
 
