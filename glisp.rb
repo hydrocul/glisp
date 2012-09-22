@@ -750,11 +750,20 @@ class ConsGlispObject < BasicConsGlispObject
 
   def _eval_func_call(env, stack, step, level)
     new_car, step, completed = car.eval(env, stack, step, level)
-    return [gl_cons(new_car, cdr), step, false] if step == 0 or not completed
+    return [gl_cons(new_car, cdr), step, false] if step == 0
+    if not completed then
+      args = cdr
+      if level != EVAL_FINAL then
+        args, step, completed = args.eval_list_each(env, stack, step, level)
+      end
+      return [gl_cons(new_car, args), step, false]
+    end
     if new_car.is_a? ProcGlispObject then
       return new_car.eval_func_call(cdr, env, stack, step, level)
     elsif new_car.is_a? ListGlispObject then
       return new_car._eval_lisp_func_call(cdr, env, stack, step, level)
+    elsif level != EVAL_FINAL then
+      return [gl_cons(new_car, cdr), step, false]
     else
       return [gl_list(:throw,
                       'Not function.',
@@ -763,15 +772,15 @@ class ConsGlispObject < BasicConsGlispObject
   end
 
   def _eval_lisp_func_call(args, env, stack, step, level)
-    args = _args_to_lazy_if_need(args)
+    args = _args_to_lazy_if_need(args, stack)
     vargs = cdr_or_nill.car_or_nill
     body = cdr_or_nill.cdr_or_nill.car_or(nil)
     c = _count_vargs(vargs)
     step = step - 1
     return [_create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)),
             step, false] if step == 0
-    stack = _push_args_to_stack(stack, vargs, args)
-    body, step, completed = body.eval(env, stack, step, level)
+    new_stack = _push_args_to_stack(new_stack, vargs, args)
+    body, step, completed = body.eval(env, new_stack, step, level)
     return [_create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)),
             step, false] if step == 0 or not completed
     return _create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)).
@@ -780,11 +789,11 @@ class ConsGlispObject < BasicConsGlispObject
     [body, step, true]
   end
 
-  def _args_to_lazy_if_need(args)
+  def _args_to_lazy_if_need(args, stack)
     if args.is_nil then
       return args
     end
-    b = _args_to_lazy_if_need(args.cdr)
+    b = _args_to_lazy_if_need(args.cdr, stack)
     a = args.car
     if not a.is_permanent then
       a = LazyEvalGlispObject.new(a, stack)
@@ -961,13 +970,13 @@ class StackPushGlispObject < BasicConsGlispObject
 
     if @value.is_permanent then
       lazy = nil
-      stack = gl_cons(gl_list2(@value, @name), stack)
+      new_stack = gl_cons(gl_list2(@value, @name), stack)
     else
       lazy = LazyEvalGlispObject.new(@value, stack)
-      stack = gl_cons(gl_list2(lazy, @name), stack)
+      new_stack = gl_cons(gl_list2(lazy, @name), stack)
     end
 
-    new_body, step, completed = @body.eval(env, stack, step, level)
+    new_body, step, completed = @body.eval(env, new_stack, step, level)
     if lazy == nil then
       new_value = @value
     else
@@ -1343,6 +1352,13 @@ def do_test
                '12',
               ])
 
+  do_test_sub(env, "((func (f) (func (x) (f (f x)))) (func (x) (+ x (+ 2 3))))",
+              [
+               '( ( func ( f ) ( func ( x ) ( f ( f x ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
+               '( ( func ( f ) ( func ( x ) ( ( stack-get 1 ) ( f x ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
+               '( ( func ( f ) ( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) x ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
+               '( ( func ( f ) ( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
+              ])
 end
 
 def do_test_sub(env, str, expected_patterns)
