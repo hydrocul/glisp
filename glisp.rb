@@ -13,9 +13,9 @@ EVAL_FUNCTION_DEFINITION = 2
 def gl_create(rubyObj)
   if rubyObj.is_a? GlispObject then
     rubyObj
-=begin
   elsif rubyObj.is_a? Symbol then
     SymbolGlispObject.new(rubyObj)
+=begin
   elsif rubyObj.is_a? String then
     StringGlispObject.new(rubyObj)
 =end
@@ -68,6 +68,7 @@ end
 
 # クラス階層図
 # GlispObject
+#   SymbolGlispObject
 #   IntegerGlispObject
 #   BooleanGlispObject
 #   ProcGlispObject
@@ -122,26 +123,32 @@ class GlispObject
 
   def is_integer
     false
+    # IntegerGlispObject で再実装している
   end
 
   def integer
     raise Exception
+    # IntegerGlispObject で再実装している
   end
 
   def integer_or(default)
     default
+    # IntegerGlispObject で再実装している
   end
 
   def is_symbol
     false
+    # SymbolGlispObject で再実装している
   end
 
   def symbol
     raise Exception
+    # SymbolGlispObject で再実装している
   end
 
   def symbol_or(default)
     default
+    # SymbolGlispObject で再実装している
   end
 
   def is_undefined
@@ -222,7 +229,7 @@ class GlispObject
 
   def is_permanent
     true
-    # ListGlispObject, NilGlispObject で再実装している
+    # SymbolGlispObject, ListGlispObject, NilGlispObject で再実装している
   end
 
   # (evalresult ...) の場合に evalresult を削除する
@@ -234,7 +241,7 @@ class GlispObject
   # is_permanent でない場合に evalresult をつける
   def encode
     self
-    # ListGlispObject, NilGlispObject で再実装している
+    # SymbolGlispObject, ListGlispObject, NilGlispObject で再実装している
   end
 
   # 返り値は [結果, step]。
@@ -249,7 +256,6 @@ class GlispObject
 
 end # GlispObject
 
-=begin
 class SymbolGlispObject < GlispObject
 
   def initialize(sym)
@@ -272,16 +278,25 @@ class SymbolGlispObject < GlispObject
     true
   end
 
+  def symbol
+    @sym
+  end
+
+  def symbol_or(default)
+    @sym
+  end
+
   def is_permanent
     false
   end
 
-  def is_undefined
-    @sym == UNDEFINED
+  def encode
+    gl_list2(:evalresult, self)
   end
 
-  def symbol
-    @sym
+=begin
+  def is_undefined
+    @sym == UNDEFINED
   end
 
   def eval(env, stack, step, level)
@@ -310,9 +325,11 @@ class SymbolGlispObject < GlispObject
     end
     return [self, step, false]
   end
+=end
 
 end # SymbolGlispObject
 
+=begin
 class StringGlispObject < GlispObject
 
   def initialize(val)
@@ -578,7 +595,7 @@ class ListGlispObject < GlispObject
   end
 
   def encode
-    gl_cons(:evalresult, self)
+    gl_list2(:evalresult, self)
   end
 
 =begin
