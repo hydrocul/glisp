@@ -72,6 +72,7 @@ end
 #   IntegerGlispObject
 #   BooleanGlispObject
 #   ProcGlispObject
+#   LazyEvalGlispObject
 #   ListGlispObject
 #     NilGlispObject
 #     ConsGlispObject
@@ -295,25 +296,20 @@ class SymbolGlispObject < GlispObject
     gl_list2(:evalresult, self)
   end
 
-=begin
-  def is_undefined
-    @sym == UNDEFINED
-  end
-
   def eval(env, stack, step, level)
     index, value = stack.get_by_key(self)
     if index then
+      step = step - 1
       if value.is_lazy then
         # 参照先が lazy だった場合は評価をする
-        step = step - 1
-        return [StackGetGlispObject.new(index), step, false] if step == 0
-        value, step, completed = value.eval_lazy(env, stack, step, level)
-        return [StackGetGlispObject.new(index), step, false] if step == 0 or not completed
-        return [value, step - 1, true]
+        return [StackGetGlispObject.new(index), step] if step == 0
+        value, step = value.eval_lazy(env, stack, step, level)
+        return [StackGetGlispObject.new(index), step] if step == 0 or value.is_lazy
+        return [value, step - 1]
       elsif value.is_undefined then
-        return [StackGetGlispObject.new(index), step - 1, false]
+        return [StackGetGlispObject.new(index), step]
       else
-        return [value, step - 1, true]
+        return [value, step]
       end
     end
     exists, value, is_val = env.global.get(symbol)
@@ -326,7 +322,6 @@ class SymbolGlispObject < GlispObject
     end
     return [self, step, false]
   end
-=end
 
 end # SymbolGlispObject
 
@@ -461,7 +456,6 @@ class ProcGlispObject < GlispObject
 
 end # ProcGlispObject
 
-=begin
 class LazyEvalGlispObject < GlispObject
 
   def initialize(body, stack)
@@ -469,6 +463,7 @@ class LazyEvalGlispObject < GlispObject
     @stack = stack
   end
 
+=begin
   def to_ss
     a = ['(', '#lazy', '(']
     a.push(* @body.to_ss)
@@ -477,32 +472,17 @@ class LazyEvalGlispObject < GlispObject
     a.push(')', ')')
     return a
   end
-
-  def is_permanent
-    false
-  end
+=end
 
   def is_lazy
     true
   end
 
   def eval_lazy(env, stack, step, level)
-    new_body, step, completed = @body.eval(env, @stack, step, level)
+    new_body, step = @body.eval(env, @stack, step, level)
     @body = new_body
-    return [self, step, false] if not completed
-    [new_body, step, true]
-  end
-
-  def eval(env, stack, step, level)
-    raise Exception
-  end
-
-  def eval_quote(env, stack, step, level, quote_depth)
-    raise Exception
-  end
-
-  def eval_force
-    raise Exception
+    return [self, step] if not new_body.is_permanent
+    [new_body, step]
   end
 
   def body
@@ -510,7 +490,6 @@ class LazyEvalGlispObject < GlispObject
   end
 
 end # LazyEvalGlispObject
-=end
 
 class ListGlispObject < GlispObject
 
@@ -1266,20 +1245,16 @@ class Global
   end
 
   def _set_basic_object(symbol, obj)
-=begin
     @vals[symbol] = gl_create(obj)
-=end
   end
 
   def _set_basic_operator(symbol, can_calc_on_compile)
-=begin
     f = proc do |*xs|
       args = xs.map {|x| x.to_rubyObj}
       ret = yield(*args)
       gl_create(ret)
     end
-    @vals[symbol] = ProcGlispObject.new(f, can_calc_on_compile)
-=end
+    @vals[symbol] = ProcGlispObject.new(f, can_calc_on_compile, symbol.to_s)
   end
 
 end # Global
