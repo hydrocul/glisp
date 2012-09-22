@@ -50,7 +50,6 @@ def gl_nil
   NilGlispObject.instance
 end
 
-=begin
 def gl_cons(car, cdr)
   ConsGlispObject.new(car, cdr)
 end
@@ -66,13 +65,13 @@ end
 def gl_list2(e1, e2)
   gl_cons(e1, gl_cons(e2, nil))
 end
-=end
 
 # クラス階層図
 # GlispObject
 #   IntegerGlispObject
 #   ListGlispObject
 #     NilGlispObject
+#     ConsGlispObject
 
 class GlispObject
 
@@ -116,7 +115,7 @@ class GlispObject
 
   def to_boolean
     true
-    # NilGlispObject で再実装している
+    # BooleanGlispObject, NilGlispObject で再実装している
   end
 
   def is_integer
@@ -227,11 +226,13 @@ class GlispObject
   # (evalresult ...) の場合に evalresult を削除する
   def decode
     self
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
   # is_permanent でない場合に evalresult をつける
   def encode
     self
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
   # 返り値は [結果, step]。
@@ -708,8 +709,9 @@ class BasicConsGlispObject < ListGlispObject
   end
 
 end # BasicConsGlispObject
+=end
 
-class ConsGlispObject < BasicConsGlispObject
+class ConsGlispObject < ListGlispObject
 
   def initialize(car, cdr)
     @car = gl_create(car)
@@ -727,15 +729,7 @@ class ConsGlispObject < BasicConsGlispObject
     @cdr
   end
 
-  def is_permanent
-    sym = car_to_sym
-    if sym == :"quote-all" then
-      true
-    else
-      false
-    end
-  end
-
+=begin
   def eval(env, stack, step, level)
 
     sym = car_to_sym
@@ -1053,9 +1047,11 @@ class ConsGlispObject < BasicConsGlispObject
       self
     end
   end
+=end
 
 end # ConsGlispObject
 
+=begin
 class StackPushGlispObject < BasicConsGlispObject
 
   @@symbolObj = SymbolGlispObject.new(:"stack-push")
@@ -1548,7 +1544,6 @@ end
 def _test_eval_expr(expr, env, expected_patterns)
   offset = 0
   step = 0
-  completed = expr.is_permanent
   while true
 
     expr_s = _test_convert_expr(expr)
@@ -1568,11 +1563,11 @@ def _test_eval_expr(expr, env, expected_patterns)
     end
     STDOUT.flush
 
-    if completed then
+    if expr.is_permanent then
       break
     end
 
-    expr, step, completed = expr.eval(env, gl_create([]), 1, EVAL_FINAL)
+    expr, step = expr.eval(env, gl_create([]), 1, EVAL_FINAL)
 
   end
   STDOUT.flush
