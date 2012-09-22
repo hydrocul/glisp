@@ -18,8 +18,10 @@ def gl_create(rubyObj)
     SymbolGlispObject.new(rubyObj)
   elsif rubyObj.is_a? String then
     StringGlispObject.new(rubyObj)
+=end
   elsif rubyObj.is_a? Integer then
-    NumberGlispObject.new(rubyObj)
+    IntegerGlispObject.new(rubyObj)
+=begin
   elsif rubyObj.is_a? Float then
     NumberGlispObject.new(rubyObj)
   elsif rubyObj == false or rubyObj == true then
@@ -69,10 +71,15 @@ def gl_list2(e1, e2)
 end
 =end
 
+# クラス階層図
 # GlispObject
-#   
+#   IntegerGlispObject
 
 class GlispObject
+
+  def ==(other)
+    raise Exception # 各サブクラスで実装すべき
+  end
 
   def to_rubyObj
     self
@@ -99,15 +106,19 @@ class GlispObject
     true
   end
 
+  def is_integer
+    false
+  end
+
+  def integer
+    raise Exception
+  end
+
+  def integer_or(default)
+    default
+  end
+
   def is_symbol
-    false
-  end
-
-  def is_undefined
-    false
-  end
-
-  def is_lazy
     false
   end
 
@@ -117,6 +128,14 @@ class GlispObject
 
   def symbol_or(default)
     default
+  end
+
+  def is_undefined
+    false
+  end
+
+  def is_lazy
+    false
   end
 
   def length
@@ -282,15 +301,16 @@ class StringGlispObject < GlispObject
   end
 
 end # SringGlispObject
+=end
 
-class NumberGlispObject < GlispObject
+class IntegerGlispObject < GlispObject
 
   def initialize(val)
     @val = val
   end
 
   def ==(other)
-    other.is_a? NumberGlispObject and other.val == val
+    other.is_a? IntegerGlispObject and other.val == val
   end
 
   def to_rubyObj
@@ -301,12 +321,21 @@ class NumberGlispObject < GlispObject
     [@val.inspect]
   end
 
-  def val
+  def is_integer
+    true
+  end
+
+  def integer
     @val
   end
 
-end # NumberGlispObject
+  def integer_or(default)
+    @val
+  end
 
+end # IntegerGlispObject
+
+=begin
 class BooleanGlispObject < GlispObject
 
   def initialize(val)
