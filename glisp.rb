@@ -1180,15 +1180,16 @@ def do_test
                '3',
               ])
 
-  do_test_sub(env, "(func (a b) (+ (* a a) b))",
+  do_test_sub(env, "(stack-push (c 1) (func (a b) (+ (* a b) c)))",
               [
-               '( func ( a b ) ( + ( * a a ) b ) )',
-               '( func ( a b ) ( #<Proc:*> ( * a a ) b ) )',
-               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> a a ) b ) )',
-               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) a ) b ) )',
-               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 0 ) ) b ) )',
-               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 0 ) ) ( stack-get 1 ) ) )',
-               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 0 ) ) ( stack-get 1 ) ) )',
+               '( stack-push ( c 1 ) ( func ( a b ) ( + ( * a b ) c ) ) )',
+               '( stack-push ( c 1 ) ( func ( a b ) ( #<Proc:*> ( * a b ) c ) ) )',
+               '( stack-push ( c 1 ) ( func ( a b ) ( #<Proc:*> ( #<Proc:*> a b ) c ) ) )',
+               '( stack-push ( c 1 ) ( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) b ) c ) ) )',
+               '( stack-push ( c 1 ) ( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) c ) ) )',
+               '( stack-push ( c 1 ) ( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) 1 ) ) )',
+               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) 1 ) )',
+               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) 1 ) )',
               ])
 
 end
