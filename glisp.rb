@@ -672,7 +672,9 @@ class ConsGlispObject < BasicConsGlispObject
     end
 
     if sym == :unquote then
-      return eval_force.eval(env, stack, step, level)
+      return [gl_list(:throw,
+                      'Unexpected `unquote\'',
+                      :Exception), step - 1, true]
     end
 
     if sym == :func then
@@ -789,9 +791,9 @@ class ConsGlispObject < BasicConsGlispObject
 
     prev_step = step
     body, step, completed = body.eval(env, stack, step, EVAL_FUNCTION_DEFINITION)
-    return [gl_list(:func, vargs, body), step] if step == 0 or not completed
-    return [body, step - 1, true]
-
+    return [gl_list(:func, vargs, body), step, false] if step == 0
+    return [body, step - 1, true] if completed
+    return [gl_list(:func, vargs, body), step, true]
   end
 
   def _push_vargs_to_stack(stack, vargs)
