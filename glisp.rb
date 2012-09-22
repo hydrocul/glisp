@@ -102,7 +102,7 @@ class GlispObject
   end
 
   def eval_quote(env, stack, step, level, quote_depth)
-    [self, step]
+    [self, step, true]
   end
 
   # (quote-all ...) の場合に quote-all を削除する
@@ -535,6 +535,10 @@ class BasicConsGlispObject < ListGlispObject
   def initialize
   end
 
+  # 返り値は [結果, step, 評価が完了しているかどうか]。
+  # EVAL_FINAL では3つ目は必ず true。
+  # EVAL_FUNCTION_DEFINITION では3つ目は最適化が完了した場合であっても、
+  # 未評価が残っている場合は false。
   def eval_quote(env, stack, step, level, quote_depth)
     sym = car_to_sym
     value = cdr.car_or(nil)
@@ -543,37 +547,34 @@ class BasicConsGlispObject < ListGlispObject
       if value == nil then
         return [gl_list(:throw,
                         '\'Quote\' needs an argument.',
-                        :Exception), step - 1]
+                        :Exception), step - 1, true]
       end
-      value, step = value.eval_quote(env, stack, step, level, quote_depth + 1)
-      return [gl_list2(:quote, value), step] if step == 0 or level != EVAL_FINAL
-      # TODO コンパイル時で未評価が残っている場合はこれでよいが、
-      # 評価が完了している場合にも quote-all ではなく、 quote として未評価の扱いになってしまう
-      if quote_depth == 0 then
-        [gl_list2(:"quote-all", value), step]
-      else
-        [gl_list2(:quote, value), step]
-      end
+      value, step, completed = value.eval_quote(env, stack, step, level, quote_depth + 1)
+      return [gl_list2(:quote, value), step, false] if step == 0
+      return [gl_list2(:quote, value), step, false] if not completed
+      return [gl_list2(:"quote-all", value), step - 1, true] if quote_depth == 0
+      return [gl_list2(:quote, value), step, true]
     elsif sym == :unquote then
       if value == nil then
         return [gl_list(:throw,
                         '\'Unquote\' needs an argument.',
-                        :Exception), step - 1]
+                        :Exception), step - 1, true]
       end
       if quote_depth == 1 then
         prev_step = step
         value, step = value.eval(env, stack, step, level)
-        return [gl_list2(:unquote, value), step] if step == 0 or not value.is_permanent
-        [value.eval_force, step - 1]
+        return [gl_list2(:unquote, value), step, false] if step == 0
+        return [gl_list2(:unquote, value), step, false] if step < prev_step
+        return [value.eval_force, step - 1, true]
       else
-        value, step = value.eval_quote(env, stack, step, level, quote_depth - 1)
-        [gl_list2(:unquote, value), step]
+        value, step, completed = value.eval_quote(env, stack, step, level, quote_depth - 1)
+        return [gl_list2(:unquote, value), step, completed]
       end
     else
-      new_car, step = car.eval_quote(env, stack, step, level, quote_depth)
-      return [gl_cons(new_car, cdr), step] if step == 0
-      new_cdr, step = cdr.eval_quote(env, stack, step, level, quote_depth)
-      [gl_cons(new_car, new_cdr), step]
+      new_car, step, completed1 = car.eval_quote(env, stack, step, level, quote_depth)
+      return [gl_cons(new_car, cdr), step, false] if step == 0
+      new_cdr, step, completed2 = cdr.eval_quote(env, stack, step, level, quote_depth)
+      return [gl_cons(new_car, new_cdr), step, completed1 && completed2]
     end
   end
 
@@ -663,7 +664,8 @@ class ConsGlispObject < BasicConsGlispObject
     end
 
     if sym == :quote then
-      return eval_quote(env, stack, step, level, 0)
+      expr, step, = eval_quote(env, stack, step, level, 0)
+      return [expr, step]
     end
 
     if sym == :"quote-all" then
@@ -1133,14 +1135,22 @@ end # Reader
 def do_test
   env = InterpreterEnv.new
 
-  do_test_sub(env, "`(a b c ,(+ 2 3) `(d ,e ,,`(+ 1 2)))",
+  do_test_sub(env, "`(a b c ,(+ 2 3))",
               [
-               '( quote ( a b c ( unquote ( + 2 3 ) ) ( quote ( d ( unquote e ) ( unquote ( unquote ( quote ( + 1 2 ) ) ) ) ) ) ) )',
-               '( quote ( a b c ( unquote ( #<Proc:*> 2 3 ) ) ( quote ( d ( unquote e ) ( unquote ( unquote ( quote ( + 1 2 ) ) ) ) ) ) ) )',
-               '( quote ( a b c ( unquote 5 ) ( quote ( d ( unquote e ) ( unquote ( unquote ( quote ( + 1 2 ) ) ) ) ) ) ) )',
-               '( quote ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( unquote ( quote ( + 1 2 ) ) ) ) ) ) ) )',
-               '( quote ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( + 1 2 ) ) ) ) ) )',
-               '( quote-all ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( + 1 2 ) ) ) ) ) )',
+               '( quote ( a b c ( unquote ( + 2 3 ) ) ) )',
+               '( quote ( a b c ( unquote ( #<Proc:*> 2 3 ) ) ) )',
+               '( quote ( a b c ( unquote 5 ) ) )',
+               '( quote ( a b c 5 ) )',
+               '( quote-all ( a b c 5 ) )',
+              ])
+
+  do_test_sub(env, "`(a `(b ,,(+ 2 3)))",
+              [
+               '( quote ( a ( quote ( b ( unquote ( unquote ( + 2 3 ) ) ) ) ) ) )',
+               '( quote ( a ( quote ( b ( unquote ( unquote ( #<Proc:*> 2 3 ) ) ) ) ) ) )',
+               '( quote ( a ( quote ( b ( unquote ( unquote 5 ) ) ) ) ) )',
+               '( quote ( a ( quote ( b ( unquote 5 ) ) ) ) )',
+               '( quote-all ( a ( quote ( b ( unquote 5 ) ) ) ) )',
               ])
 
   do_test_sub(env, "(stack-push (a 1) (* (+ a 2) (+ a 3)))",
