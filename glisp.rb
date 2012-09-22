@@ -75,6 +75,7 @@ end
 #   ListGlispObject
 #     NilGlispObject
 #     ConsGlispObject
+#     GlobalGetGlispObject
 
 class GlispObject
 
@@ -1168,8 +1169,9 @@ class StackGetGlispObject < BasicConsGlispObject
   end
 
 end # StackGetGlispObject
+=end
 
-class GlobalGetGlispObject < BasicConsGlispObject
+class GlobalGetGlispObject < ListGlispObject
 
   @@symbolObj = SymbolGlispObject.new(:"global-get")
 
@@ -1186,10 +1188,6 @@ class GlobalGetGlispObject < BasicConsGlispObject
     gl_cons(@name, nil)
   end
 
-  def is_permanent
-    false
-  end
-
   def eval(env, stack, step, level)
 
     raise Exception, "TODO"
@@ -1198,8 +1196,7 @@ class GlobalGetGlispObject < BasicConsGlispObject
 
   end
 
-end # StackGetGlispObject
-=end
+end # GlobalGetGlispObject
 
 class InterpreterEnv
 
