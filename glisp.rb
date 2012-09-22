@@ -89,6 +89,10 @@ class GlispObject
     true
   end
 
+  def is_symbol
+    false
+  end
+
   def is_undefined
     false
   end
@@ -137,8 +141,8 @@ class SymbolGlispObject < GlispObject
     [@sym.to_s]
   end
 
-  def symbol
-    @sym
+  def is_symbol
+    true
   end
 
   def is_permanent
@@ -147,6 +151,10 @@ class SymbolGlispObject < GlispObject
 
   def is_undefined
     @sym == UNDEFINED
+  end
+
+  def symbol
+    @sym
   end
 
   def eval(env, stack, step, level)
@@ -417,7 +425,7 @@ class ListGlispObject < GlispObject
   # シンボルでない場合はnilを返す
   def car_to_sym
     a = car_or(nil)
-    if a.is_a? SymbolGlispObject then
+    if a.is_symbol then
       a.symbol
     else
       nil
@@ -626,7 +634,7 @@ class ConsGlispObject < BasicConsGlispObject
       name = second.car_or(nil)
       value = second.cdr_or_nill.car_or(nil)
       body = cdr_or_nill.cdr_or_nill.car_or(nil)
-      if name.is_a? SymbolGlispObject and value != nil and body != nil then
+      if name.is_symbol and value != nil and body != nil then
         return StackPushGlispObject.new(name.symbol, value, body).
           eval(env, stack, step, level)
       end
@@ -647,7 +655,7 @@ class ConsGlispObject < BasicConsGlispObject
 
     if sym == :"global-get" then
       name = cdr_or_nill.car_or(nil)
-      if name.is_a? SymbolGlispObject then
+      if name.is_symbol then
         return GlobalGetGlispObject.new(name).eval(env, stack, step, level)
       end
       return [gl_list(:throw,
@@ -746,7 +754,7 @@ class ConsGlispObject < BasicConsGlispObject
     if new_car.is_a? ProcGlispObject then
       return new_car.eval_func_call(cdr, env, stack, step, level)
     elsif new_car.is_a? ListGlispObject then
-      return new_car._eval_lisp_func_call(env, stack, step, level)
+      return new_car._eval_lisp_func_call(cdr, env, stack, step, level)
     else
       return [gl_list(:throw,
                       'Not function.',
@@ -754,8 +762,93 @@ class ConsGlispObject < BasicConsGlispObject
     end
   end
 
-  def _eval_lisp_func_call(env, stack, step, level)
-    raise Exception, "TODO"
+  def _eval_lisp_func_call(args, env, stack, step, level)
+    args = _args_to_lazy_if_need(args)
+    vargs = cdr_or_nill.car_or_nill
+    body = cdr_or_nill.cdr_or_nill.car_or(nil)
+    c = _count_vargs(vargs)
+    step = step - 1
+    return [_create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)),
+            step, false] if step == 0
+    stack = _push_args_to_stack(stack, vargs, args)
+    body, step, completed = body.eval(env, stack, step, level)
+    return [_create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)),
+            step, false] if step == 0 or not completed
+    return _create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)).
+      eval(env, stack, step, level) if step < c
+    step = step - c
+    [body, step, true]
+  end
+
+  def _args_to_lazy_if_need(args)
+    if args.is_nil then
+      return args
+    end
+    b = _args_to_lazy_if_need(args.cdr)
+    a = args.car
+    if not a.is_permanent then
+      a = LazyEvalGlispObject.new(a, stack)
+    end
+    gl_cons(a, b)
+  end
+
+  def _args_from_lazy(args)
+    if args.is_nil then
+      return args
+    end
+    b = _args_from_lazy(args.cdr)
+    a = args.car
+    if a.is_lazy then
+      a = a.body
+    end
+    gl_cons(a, b)
+  end
+
+  def _create_expr_push_args_to_stack(expr, vargs, args)
+    v = vargs.car_or(nil)
+    if v == nil then
+      return expr
+    end
+    begin
+      a = args.car
+      b = args.cdr
+    rescue
+      a = gl_nill
+      b = a
+    end
+    if v.is_symbol then
+      expr = StackPushGlispObject.new(v, a, expr)
+    end
+    _create_expr_push_args_to_stack(expr, vargs.cdr, b)
+  end
+
+  def _push_args_to_stack(stack, vargs, args)
+    v = vargs.car_or(nil)
+    if v == nil then
+      return stack
+    end
+    begin
+      a = args.car
+      b = args.cdr
+    rescue
+      a = gl_nill
+      b = a
+    end
+    if v.is_symbol then
+      stack = gl_cons(gl_list2(a, v), stack)
+    end
+    _push_args_to_stack(stack, vargs.cdr, b)
+  end
+
+  def _count_vargs(vargs)
+    v = vargs.car_or(nil)
+    if v == nil then
+      return 0
+    end
+    if v.is_symbol then
+      return _count_vargs(vargs.cdr) + 1
+    end
+    _count_vargs(vargs.cdr)
   end
 
   # carが :if の場合に eval から呼び出される
@@ -815,12 +908,15 @@ class ConsGlispObject < BasicConsGlispObject
   end
 
   def _push_vargs_to_stack(stack, vargs)
-    a = vargs.car_or(nil)
-    if a == nil then
+    v = vargs.car_or(nil)
+    if v == nil then
       return stack
     end
     stack = _push_vargs_to_stack(stack, vargs.cdr)
-    gl_cons(gl_list2(UNDEFINED, a), stack)
+    if not v.is_symbol then
+      return stack
+    end
+    gl_cons(gl_list2(UNDEFINED, v), stack)
   end
 
   def eval_force
@@ -1231,6 +1327,20 @@ def do_test
                '( stack-push ( c 1 ) ( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) c ) ) )',
                '( stack-push ( c 1 ) ( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) 1 ) ) )',
                '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) 1 ) )',
+              ])
+
+  do_test_sub(env, '((func (a b) (* a b)) 3 4)',
+              [
+               '( ( func ( a b ) ( * a b ) ) 3 4 )',
+               '( ( func ( a b ) ( #<Proc:*> a b ) ) 3 4 )',
+               '( ( func ( a b ) ( #<Proc:*> ( stack-get 0 ) b ) ) 3 4 )',
+               '( ( func ( a b ) ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) ) 3 4 )',
+               '( stack-push ( b 4 ) ( stack-push ( a 3 ) ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) ) )',
+               '( stack-push ( b 4 ) ( stack-push ( a 3 ) ( #<Proc:*> 3 ( stack-get 1 ) ) ) )',
+               '( stack-push ( b 4 ) ( stack-push ( a 3 ) ( #<Proc:*> 3 4 ) ) )',
+               '( stack-push ( b 4 ) ( stack-push ( a 3 ) 12 ) )',
+               '( stack-push ( b 4 ) 12 )',
+               '12',
               ])
 
 end
