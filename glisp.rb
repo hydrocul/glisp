@@ -4,15 +4,16 @@
 require 'stringio'
 
 EOF = :"$eof"
-UNDEFINED = :"$undefined-on-compile"
+#UNDEFINED = :"$undefined-on-compile"
 
 EVAL_FINAL = 1
 EVAL_FUNCTION_DEFINITION = 2
-EVAL_OPTIMIZATION = 3
+#EVAL_OPTIMIZATION = 3
 
 def gl_create(rubyObj)
   if rubyObj.is_a? GlispObject then
     rubyObj
+=begin
   elsif rubyObj.is_a? Symbol then
     SymbolGlispObject.new(rubyObj)
   elsif rubyObj.is_a? String then
@@ -29,11 +30,13 @@ def gl_create(rubyObj)
     _gl_createList(rubyObj, 0)
   elsif rubyObj == nil then
     gl_nill
+=end
   else
     raise Exception, rubyObj.inspect
   end
 end
 
+=begin
 def _gl_createList(arrayRubyObj, offset)
   if offset == arrayRubyObj.length then
     gl_nill
@@ -41,11 +44,14 @@ def _gl_createList(arrayRubyObj, offset)
     gl_cons(arrayRubyObj[offset], _gl_createList(arrayRubyObj, offset + 1))
   end
 end
+=end
 
-def gl_nill
+def gl_nil
+  raise Exception, "TODO"
   NilGlispObject.instance
 end
 
+=begin
 def gl_cons(car, cdr)
   ConsGlispObject.new(car, cdr)
 end
@@ -61,6 +67,10 @@ end
 def gl_list2(e1, e2)
   gl_cons(e1, gl_cons(e2, nil))
 end
+=end
+
+# GlispObject
+#   
 
 class GlispObject
 
@@ -81,8 +91,8 @@ class GlispObject
     false
   end
 
-  def is_permanent
-    true
+  def is_nil
+    raise Exception
   end
 
   def to_boolean
@@ -101,28 +111,91 @@ class GlispObject
     false
   end
 
-  # 返り値は [結果, step, 評価が完了しているかどうか]。
-  # EVAL_FINAL では3つ目は必ず true。
-  # EVAL_FUNCTION_DEFINITION では3つ目は最適化が完了した場合であっても、
-  # 未評価が残っている場合は false。
-  # 3つ目の返り値が true で結果の is_permanent が false の場合は、
-  # (quote-all 結果) として is_permanent を true にすべきである。
+  def symbol
+    raise Exception
+  end
+
+  def symbol_or(default)
+    default
+  end
+
+  def length
+    raise Exception
+  end
+
+  def car
+    raise Exception
+  end
+
+  def cdr
+    raise Exception
+  end
+
+  def car_or(default)
+    default
+  end
+
+  def cdr_or(default)
+    default
+  end
+
+  def cadr
+    cdr.car
+  end
+
+  def cadr_or(default)
+    cdr_or(gl_nil).car_or(default)
+  end
+
+  def caddr_or(default)
+    cdr_or(gl_nil).cdr_or(gl_nil).car_or(default)
+  end
+
+  # [存在するかどうかの論理値, 取得した値] を返す
+  def get_by_index(index)
+    [false, nil]
+  end
+
+  # ((1 a) (2 b) (3 c)) のような形式でマップを表現されたときの
+  # キーから値を取得する。各ペアの1つ目が値、2つ目がキー。
+  # [インデックス, 取得した値] を返す。
+  # 存在しない場合は [false, nil] を返す
+  def get_by_key(key)
+    [false, nil]
+  end
+
+  # Rubyの配列に変換する
+  def to_list
+    raise Exception
+  end
+
+  def is_permanent
+    true
+  end
+
+  # (expr ...) の場合に expr を削除する
+  def decode
+    self
+  end
+
+  # is_permanent でない場合に expr をつける
+  def encode
+    self
+  end
+
+  # 返り値は [結果, step]。
   def eval(env, stack, step, level)
-    [self, step, true]
+    [self, step]
   end
 
   # 返り値は eval と同じ仕様
   def eval_quote(env, stack, step, level, quote_depth)
-    [self, step, true]
-  end
-
-  # (quote-all ...) の場合に quote-all を削除する
-  def eval_force
-    self
+    [self, step]
   end
 
 end # GlispObject
 
+=begin
 class SymbolGlispObject < GlispObject
 
   def initialize(sym)
@@ -1067,6 +1140,7 @@ class GlobalGetGlispObject < BasicConsGlispObject
   end
 
 end # StackGetGlispObject
+=end
 
 class InterpreterEnv
 
@@ -1136,16 +1210,20 @@ class Global
   end
 
   def _set_basic_object(symbol, obj)
+=begin
     @vals[symbol] = gl_create(obj)
+=end
   end
 
   def _set_basic_operator(symbol, can_calc_on_compile)
+=begin
     f = proc do |*xs|
       args = xs.map {|x| x.to_rubyObj}
       ret = yield(*args)
       gl_create(ret)
     end
     @vals[symbol] = ProcGlispObject.new(f, can_calc_on_compile)
+=end
   end
 
 end # Global
