@@ -93,6 +93,10 @@ class GlispObject
     false
   end
 
+  def is_lazy
+    false
+  end
+
   def eval(env, stack, step, level)
     [self, step]
   end
@@ -141,7 +145,7 @@ class SymbolGlispObject < GlispObject
   def eval(env, stack, step, level)
     index, value = stack.get_by_key(self)
     if index then
-      if not value.is_undefined and not value.is_a? LazyEvalGlispObject then
+      if not value.is_undefined and not value.is_lazy then
         return [value, step - 1]
       end
       return [StackGetGlispObject.new(index), step - 1]
@@ -298,6 +302,10 @@ class LazyEvalGlispObject < GlispObject
 
   def is_permanent
     false
+  end
+
+  def is_lazy
+    true
   end
 
   def eval_lazy(env, stack, step, level)
@@ -885,7 +893,7 @@ class StackGetGlispObject < BasicConsGlispObject
 
     value = value.car
 
-    if value.is_a? LazyEvalGlispObject then
+    if value.is_lazy then
       # 参照先が lazy-eval だった場合は評価をする
       value, step = value.eval_lazy(env, stack, step, level)
       return [self, step] if step == 0 or not value.is_permanent
@@ -1136,14 +1144,6 @@ def do_test
                '( quote-all ( a b c 5 ( quote ( d ( unquote e ) ( unquote ( + 1 2 ) ) ) ) ) )',
               ])
 
-  do_test_sub(env, "(+ 2 3)",
-              [
-               '( + 2 3 )',
-               '( #<Proc:*> 2 3 )',
-               '5',
-               '5',
-              ])
-
   do_test_sub(env, "(stack-push (a 1) (* (+ a 2) (+ a 3)))",
               [
                '( stack-push ( a 1 ) ( * ( + a 2 ) ( + a 3 ) ) )',
@@ -1155,7 +1155,6 @@ def do_test
                '( stack-push ( a 1 ) ( #<Proc:*> 3 ( #<Proc:*> 1 3 ) ) )',
                '( stack-push ( a 1 ) ( #<Proc:*> 3 4 ) )',
                '( stack-push ( a 1 ) 12 )',
-               '12',
                '12',
               ])
 
@@ -1169,14 +1168,12 @@ def do_test
                '( stack-push ( a 7 ) ( #<Proc:*> 7 2 ) )',
                '( stack-push ( a 7 ) 9 )',
                '9',
-               '9',
               ])
 
   do_test_sub(env, "(if false (/ 1 0) (car (3 1)))",
               [
                '( if false ( / 1 0 ) ( car ( 3 1 ) ) )',
                '( car ( 3 1 ) )',
-               '3',
                '3',
               ])
 
@@ -1188,7 +1185,6 @@ def do_test
                '( stack-push ( c 1 ) ( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) b ) c ) ) )',
                '( stack-push ( c 1 ) ( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) c ) ) )',
                '( stack-push ( c 1 ) ( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) 1 ) ) )',
-               '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) 1 ) )',
                '( func ( a b ) ( #<Proc:*> ( #<Proc:*> ( stack-get 0 ) ( stack-get 1 ) ) 1 ) )',
               ])
 
