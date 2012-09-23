@@ -73,6 +73,7 @@ end
 #   ListGlispObject
 #     NilGlispObject
 #     ConsGlispObject
+#     StackPushGlispObject
 #     StackGetGlispObject
 #     GlobalGetGlispObject
 
@@ -770,19 +771,19 @@ class ConsGlispObject < ListGlispObject
     # 以下の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
     # 手動で生成した場合はここで処理する
 
-#    if sym == :"stack-push" then
-#      second = cdr_or_nill.car_or_nill
-#      name = second.car_or(nil)
-#      value = second.cdr_or_nill.car_or(nil)
-#      body = cdr_or_nill.cdr_or_nill.car_or(nil)
-#      if name.is_symbol and value != nil and body != nil then
-#        return StackPushGlispObject.new(name.symbol, value, body).
-#          eval(env, stack, step, level)
-#      end
-#      return [gl_list(:throw,
-#                      'Illegal stack-push operator.',
-#                      :Exception), step - 1, true]
-#    end
+    if sym == :"stack-push" then
+      second = cadr_or(gl_nil)
+      name = second.car_or(nil)
+      value = second.cadr_or(nil)
+      body = caddr_or(gl_nil)
+      if name != nil and name.is_symbol and value != nil and body != nil then
+        return StackPushGlispObject.new(name.symbol, value, body).
+          eval(env, stack, step, level)
+      end
+      return [gl_list(:throw,
+                      'Illegal stack-push operator.',
+                      :Exception), step - 1]
+    end
 
     if sym == :"stack-get" then
       index = cardr_or(nil)
@@ -1067,52 +1068,44 @@ class ConsGlispObject < ListGlispObject
 
 end # ConsGlispObject
 
-#class StackPushGlispObject < BasicConsGlispObject
-#
-#  @@symbolObj = SymbolGlispObject.new(:"stack-push")
-#
-#  # nameはRubyプリミティブのシンボル
-#  def initialize(name, value, body)
-#    @name = name
-#    @value = value
-#    @body = body
-#  end
-#
-#  def car
-#    @@symbolObj
-#  end
-#
-#  def cdr
-#    gl_list2(gl_list2(@name, @value), @body)
-#  end
-#
-#  def is_permanent
-#    false
-#  end
-#
-#  def eval(env, stack, step, level)
-#
-#    if @value.is_permanent then
-#      lazy = nil
-#      new_stack = gl_cons(gl_list2(@value, @name), stack)
-#    else
-#      lazy = LazyEvalGlispObject.new(@value, stack)
-#      new_stack = gl_cons(gl_list2(lazy, @name), stack)
-#    end
-#
-#    new_body, step, completed = @body.eval(env, new_stack, step, level)
-#    if lazy == nil then
-#      new_value = @value
-#    else
-#      new_value = lazy.body
-#    end
-#    return [StackPushGlispObject.new(@name, new_value, new_body),
-#            step, false]  if step == 0 or not completed
-#    [new_body, step - 1, true]
-#
-#  end
-#
-#end # StackPushGlispObject
+class StackPushGlispObject < ListGlispObject
+
+  @@symbolObj = SymbolGlispObject.new(:"stack-push")
+
+  # nameはRubyプリミティブのシンボル
+  def initialize(name, value, body)
+    @name = name
+    @value = value
+    @body = body
+  end
+
+  def car
+    @@symbolObj
+  end
+
+  def cdr
+    gl_list2(gl_list2(@name, @value), @body)
+  end
+
+  def eval(env, stack, step, level)
+    if @value.is_permanent then
+      new_stack = gl_cons(gl_list2(@value, @name), stack)
+      new_body, step = @body.eval(env, new_stack, step, level)
+      return [StackPushGlispObject.new(@name, @value, new_body),
+              step]  if step == 0 or not new_body.is_permanent
+      return [new_body, step - 1]
+    else
+      lazy = LazyEvalGlispObject.new(@value, stack)
+      new_stack = gl_cons(gl_list2(lazy, @name), stack)
+      new_body, step = @body.eval(env, new_stack, step, level)
+      new_value = lazy.body
+      return [StackPushGlispObject.new(@name, new_value, new_body),
+              step]  if step == 0 or not new_body.is_permanent
+      [new_body, step - 1]
+    end
+  end
+
+end # StackPushGlispObject
 
 class StackGetGlispObject < ListGlispObject
 
@@ -1614,6 +1607,3 @@ end
 if __FILE__ == $PROGRAM_NAME then
   do_test
 end
-
-
-
