@@ -247,13 +247,13 @@ class GlispObject
     # SymbolGlispObject, ListGlispObject, NilGlispObject で再実装している
   end
 
-  # (evalresult ...) の場合に evalresult を削除する
+  # (eval-result ...) の場合に eval-result を削除する
   def decode
     self
     # ListGlispObject, NilGlispObject で再実装している
   end
 
-  # is_permanent でない場合に evalresult をつける
+  # is_permanent でない場合に eval-result をつける
   def encode
     self
     # SymbolGlispObject, ListGlispObject, NilGlispObject で再実装している
@@ -330,7 +330,7 @@ class SymbolGlispObject < GlispObject
   end
 
   def encode
-    gl_list2(:evalresult, self)
+    gl_list2(:"eval-result", self)
   end
 
   def eval(env, stack, step, level)
@@ -600,18 +600,18 @@ class ListGlispObject < GlispObject
   end
 
   def is_permanent
-    car_symbol == :evalresult
+    car_symbol == :"eval-result"
   end
 
   def decode
-    if car_symbol != :evalresult then
+    if car_symbol != :"eval-result" then
       raise RuntimeError
     end
     cadr # ここで例外は発生しないはず
   end
 
   def encode
-    gl_list2(:evalresult, self)
+    gl_list2(:"eval-result", self)
   end
 
   def eval_quote(env, stack, step, level, quote_depth)
@@ -625,7 +625,7 @@ class ListGlispObject < GlispObject
       value, step, completed = value.eval_quote(env, stack, step, level, quote_depth + 1)
       return [gl_list2(:quote, value), step, true] if quote_depth > 0 and completed
       return [gl_list2(:quote, value), step, false] if step == 0 or not completed
-      return [gl_list2(:evalresult, value), step - 1, true]
+      return [gl_list2(:"eval-result", value), step - 1, true]
     elsif sym == :unquote then
       if value == nil then
         return [gl_nil, step - 1, true]
@@ -808,7 +808,7 @@ class ConsGlispObject < ListGlispObject
     # 以上の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
     # 手動で生成した場合はここで処理する
 
-    if sym == :"evalresult" then
+    if sym == :"eval-result" then
       return [self, step]
     end
 
@@ -1383,16 +1383,16 @@ def do_test
                'true',
               ])
 
-  do_test_sub(env, "(car (evalresult (2 3 4)))",
+  do_test_sub(env, "(car (eval-result (2 3 4)))",
               [
-               '( car ( evalresult ( 2 3 4 ) ) )',
+               '( car ( eval-result ( 2 3 4 ) ) )',
                '2',
               ])
 
-  do_test_sub(env, "(cdr (evalresult (2 3 4)))",
+  do_test_sub(env, "(cdr (eval-result (2 3 4)))",
               [
-               '( cdr ( evalresult ( 2 3 4 ) ) )',
-               '( evalresult ( 3 4 ) )',
+               '( cdr ( eval-result ( 2 3 4 ) ) )',
+               '( eval-result ( 3 4 ) )',
               ])
 
   do_test_sub(env, "(+ 2 3)",
@@ -1408,7 +1408,7 @@ def do_test
                '( quote ( a b c ( unquote ( Proc* 2 3 ) ) ) )',
                '( quote ( a b c ( unquote 5 ) ) )',
                '( quote ( a b c 5 ) )',
-               '( evalresult ( a b c 5 ) )',
+               '( eval-result ( a b c 5 ) )',
               ])
 
   do_test_sub(env, "`(a `(b ,,(+ 2 3)))",
@@ -1417,7 +1417,7 @@ def do_test
                '( quote ( a ( quote ( b ( unquote ( unquote ( Proc* 2 3 ) ) ) ) ) ) )',
                '( quote ( a ( quote ( b ( unquote ( unquote 5 ) ) ) ) ) )',
                '( quote ( a ( quote ( b ( unquote 5 ) ) ) ) )',
-               '( evalresult ( a ( quote ( b ( unquote 5 ) ) ) ) )',
+               '( eval-result ( a ( quote ( b ( unquote 5 ) ) ) ) )',
               ])
 
   do_test_sub(env, "(stack-push (a 1) (* (+ a 2) (+ a 3)))",
