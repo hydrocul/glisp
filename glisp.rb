@@ -15,8 +15,8 @@ def gl_create(rubyObj)
     rubyObj
   elsif rubyObj.is_a? Symbol then
     SymbolGlispObject.new(rubyObj)
-#  elsif rubyObj.is_a? String then
-#    StringGlispObject.new(rubyObj)
+  elsif rubyObj.is_a? String then
+    StringGlispObject.new(rubyObj)
   elsif rubyObj.is_a? Integer then
     IntegerGlispObject.new(rubyObj)
 #  elsif rubyObj.is_a? Float then
@@ -65,6 +65,7 @@ end
 # クラス階層図
 # GlispObject
 #   SymbolGlispObject
+#   StringGlispObject
 #   IntegerGlispObject
 #   BooleanGlispObject
 #   ProcGlispObject
@@ -279,7 +280,7 @@ class GlispObject
   def eval_each(env, stack, step, level)
     new_car, step = car.eval(env, stack, step, level)
     return [gl_cons(new_car, cdr), step] if step == 0
-    new_cdr, step = cdr.list_eval_each(env, stack, step, level)
+    new_cdr, step = cdr.eval_each(env, stack, step, level)
     [gl_cons(new_car, new_cdr), step]
     # NilGlispObject で再実装している
   end
@@ -303,7 +304,7 @@ class SymbolGlispObject < GlispObject
   end
 
   def to_rubyObj
-    sym
+    @sym
   end
 
   def to_ss
@@ -359,29 +360,25 @@ class SymbolGlispObject < GlispObject
 
 end # SymbolGlispObject
 
-#class StringGlispObject < GlispObject
-#
-#  def initialize(val)
-#    @val = val
-#  end
-#
-#  def ==(other)
-#    other.is_a? StringGlispObject and other.val == val
-#  end
-#
-#  def to_rubyObj
-#    val
-#  end
-#
-#  def to_ss
-#    [@val.inspect]
-#  end
-#
-#  def val
-#    @val
-#  end
-#
-#end # SringGlispObject
+class StringGlispObject < GlispObject
+
+  def initialize(val)
+    @val = val
+  end
+
+  def ==(other)
+    other.is_a? StringGlispObject and other.val == val
+  end
+
+  def to_rubyObj
+    @val
+  end
+
+  def to_ss
+    [@val.inspect]
+  end
+
+end # SringGlispObject
 
 class IntegerGlispObject < GlispObject
 
@@ -394,7 +391,7 @@ class IntegerGlispObject < GlispObject
   end
 
   def to_rubyObj
-    val
+    @val
   end
 
   def to_ss
@@ -426,7 +423,7 @@ class BooleanGlispObject < GlispObject
   end
 
   def to_rubyObj
-    val
+    @val
   end
 
   def to_ss
@@ -452,7 +449,7 @@ class ProcGlispObject < GlispObject
   end
 
   def to_rubyObj
-    val
+    @proc
   end
 
   def to_ss
@@ -471,18 +468,17 @@ class ProcGlispObject < GlispObject
     @can_calc_on_compile
   end
 
-  def eval_func_call(args, env, stack, step, level)
-    raise Exception # TODO
-#    args, step, completed = args.eval_list_each(env, stack, step, level)
-#    return [gl_cons(self, args), step, false] if step == 0 or not completed
-#    return [gl_cons(self, args), step, false] if level != EVAL_FINAL and not can_calc_on_compile
-#    begin
-#      return [gl_create(@proc.call(* args.to_list)), step - 1, true]
-#    rescue => e
-#      return [gl_list(:throw,
-#                      '[%s] %s' % [e.class, e.message],
-#                      :Exception), step - 1, true]
-#    end
+  def eval_func_call(env, stack, step, level, args)
+    args, step = args.eval_each(env, stack, step, level)
+    return [gl_cons(self, args), step] if step == 0 or not args.is_permanent_all
+    return [gl_cons(self, args), step] if level != EVAL_FINAL and not @can_calc_on_compile
+    begin
+      return [gl_create(@proc.call(* args.to_list)), step - 1]
+    rescue => e
+      return [gl_list(:throw,
+                      '[%s] %s' % [e.class, e.message],
+                      :Exception), step - 1]
+    end
   end
 
 end # ProcGlispObject
