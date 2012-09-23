@@ -217,6 +217,10 @@ class GlispObject
     cdr.car.cdr
   end
 
+  def caddr
+    cdr.cdr.car
+  end
+
   def caddr_or(default)
     cdr_or(gl_nil).cdr_or(gl_nil).car_or(default)
   end
@@ -820,9 +824,9 @@ class ConsGlispObject < ListGlispObject
       return _eval_cdr(env, stack, step, level)
     end
 
-#    if sym == :cons then
-#      return _eval_cons(env, stack, step, level)
-#    end
+    if sym == :cons then
+      return _eval_cons(env, stack, step, level)
+    end
 
     if sym == :quote then
       result, step, = eval_quote(env, stack, step, level, 0)
@@ -874,7 +878,7 @@ class ConsGlispObject < ListGlispObject
     rescue
       return [gl_list(:throw,
                       '\'Car\' needs a list argument.',
-                      :Exception), step - 1]
+                      :Exception), step]
     end
   end
 
@@ -895,7 +899,32 @@ class ConsGlispObject < ListGlispObject
     rescue
       return [gl_list(:throw,
                       '\'Cdr\' needs a list argument.',
+                      :Exception), step]
+    end
+  end
+
+  # carが :cons の場合に eval から呼び出される
+  def _eval_cons(env, stack, step, level)
+    begin
+      arg1 = cadr
+      arg2 = caddr
+    rescue
+      return [gl_list(:throw,
+                      '\'Cons\' needs two arguments.',
                       :Exception), step - 1]
+    end
+    arg1, step = arg1.eval(env, stack, step, level)
+    return [gl_list(:cons, arg1, arg2), step] if step == 0
+    arg2, step = arg2.eval(env, stack, step, level)
+    return [gl_list(:cons, arg1, arg2), step] if step == 0 or
+      not arg1.is_permanent or not arg2.is_permanent
+    step = step - 1
+    begin
+      return [gl_cons(arg1.decode, arg2.decode).encode, step]
+    rescue
+      return [gl_list(:throw,
+                      '\'Cons\' second argument must be a list.',
+                      :Exception), step]
     end
   end
 
@@ -1393,6 +1422,18 @@ def do_test
               [
                '( cdr ( eval-result ( 2 3 4 ) ) )',
                '( eval-result ( 3 4 ) )',
+              ])
+
+  do_test_sub(env, "(cons (eval-result (2 3 4)) (eval-result (5 6 7)))",
+              [
+               '( cons ( eval-result ( 2 3 4 ) ) ( eval-result ( 5 6 7 ) ) )',
+               '( eval-result ( ( 2 3 4 ) 5 6 7 ) )',
+              ])
+
+  do_test_sub(env, "(cons (eval-result (2 3 4)) 5)",
+              [
+               '( cons ( eval-result ( 2 3 4 ) ) 5 )',
+               '( throw "\'Cons\' second argument must be a list." Exception )',
               ])
 
   do_test_sub(env, "(+ 2 3)",
