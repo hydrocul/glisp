@@ -76,6 +76,7 @@ end
 #   ListGlispObject
 #     NilGlispObject
 #     ConsGlispObject
+#     StackGetGlispObject
 #     GlobalGetGlispObject
 
 class GlispObject
@@ -1100,8 +1101,9 @@ class StackPushGlispObject < BasicConsGlispObject
   end
 
 end # StackPushGlispObject
+=end
 
-class StackGetGlispObject < BasicConsGlispObject
+class StackGetGlispObject < ListGlispObject
 
   @@symbolObj = SymbolGlispObject.new(:"stack-get")
 
@@ -1118,10 +1120,6 @@ class StackGetGlispObject < BasicConsGlispObject
     gl_cons(@index, nil)
   end
 
-  def is_permanent
-    false
-  end
-
   def eval(env, stack, step, level)
 
     exists, value = stack.get_by_index(@index)
@@ -1129,26 +1127,25 @@ class StackGetGlispObject < BasicConsGlispObject
     if not exists then
       return [gl_list(:throw,
                       'Stack index is out of bound: %d' % [@index],
-                      :Exception), step - 1, true]
+                      :Exception), step - 1]
     end
 
     value = value.car
 
     if value.is_lazy then
       # 参照先が lazy だった場合は評価をする
-      value, step, completed = value.eval_lazy(env, stack, step, level)
-      return [self, step, false] if step == 0 or not completed
-      [value, step - 1, true]
+      value, step = value.eval_lazy(env, stack, step, level)
+      return [self, step] if step == 0 or value.is_lazy
+      [value, step - 1]
     elsif value.is_undefined then
-      [self, step, false]
+      [self, step]
     else
-      [value, step - 1, true]
+      [value, step - 1]
     end
 
   end
 
 end # StackGetGlispObject
-=end
 
 class GlobalGetGlispObject < ListGlispObject
 
