@@ -15,16 +15,12 @@ def gl_create(rubyObj)
     rubyObj
   elsif rubyObj.is_a? Symbol then
     SymbolGlispObject.new(rubyObj)
-=begin
-  elsif rubyObj.is_a? String then
-    StringGlispObject.new(rubyObj)
-=end
+#  elsif rubyObj.is_a? String then
+#    StringGlispObject.new(rubyObj)
   elsif rubyObj.is_a? Integer then
     IntegerGlispObject.new(rubyObj)
-=begin
-  elsif rubyObj.is_a? Float then
-    NumberGlispObject.new(rubyObj)
-=end
+#  elsif rubyObj.is_a? Float then
+#    NumberGlispObject.new(rubyObj)
   elsif rubyObj == false or rubyObj == true then
     BooleanGlispObject.new(rubyObj)
   elsif rubyObj.is_a? Proc then
@@ -326,31 +322,29 @@ class SymbolGlispObject < GlispObject
 
 end # SymbolGlispObject
 
-=begin
-class StringGlispObject < GlispObject
-
-  def initialize(val)
-    @val = val
-  end
-
-  def ==(other)
-    other.is_a? StringGlispObject and other.val == val
-  end
-
-  def to_rubyObj
-    val
-  end
-
-  def to_ss
-    [@val.inspect]
-  end
-
-  def val
-    @val
-  end
-
-end # SringGlispObject
-=end
+#class StringGlispObject < GlispObject
+#
+#  def initialize(val)
+#    @val = val
+#  end
+#
+#  def ==(other)
+#    other.is_a? StringGlispObject and other.val == val
+#  end
+#
+#  def to_rubyObj
+#    val
+#  end
+#
+#  def to_ss
+#    [@val.inspect]
+#  end
+#
+#  def val
+#    @val
+#  end
+#
+#end # SringGlispObject
 
 class IntegerGlispObject < GlispObject
 
@@ -440,20 +434,18 @@ class ProcGlispObject < GlispObject
     @can_calc_on_compile
   end
 
-=begin
-  def eval_func_call(args, env, stack, step, level)
-    args, step, completed = args.eval_list_each(env, stack, step, level)
-    return [gl_cons(self, args), step, false] if step == 0 or not completed
-    return [gl_cons(self, args), step, false] if level != EVAL_FINAL and not can_calc_on_compile
-    begin
-      return [gl_create(@proc.call(* args.to_list)), step - 1, true]
-    rescue => e
-      return [gl_list(:throw,
-                      '[%s] %s' % [e.class, e.message],
-                      :Exception), step - 1, true]
-    end
-  end
-=end
+#  def eval_func_call(args, env, stack, step, level)
+#    args, step, completed = args.eval_list_each(env, stack, step, level)
+#    return [gl_cons(self, args), step, false] if step == 0 or not completed
+#    return [gl_cons(self, args), step, false] if level != EVAL_FINAL and not can_calc_on_compile
+#    begin
+#      return [gl_create(@proc.call(* args.to_list)), step - 1, true]
+#    rescue => e
+#      return [gl_list(:throw,
+#                      '[%s] %s' % [e.class, e.message],
+#                      :Exception), step - 1, true]
+#    end
+#  end
 
 end # ProcGlispObject
 
@@ -464,16 +456,14 @@ class LazyEvalGlispObject < GlispObject
     @stack = stack
   end
 
-=begin
-  def to_ss
-    a = ['(', '#lazy', '(']
-    a.push(* @body.to_ss)
-    a.push(')', '(')
-    a.push(* @stack.to_ss)
-    a.push(')', ')')
-    return a
-  end
-=end
+#  def to_ss
+#    a = ['(', '#lazy', '(']
+#    a.push(* @body.to_ss)
+#    a.push(')', '(')
+#    a.push(* @stack.to_ss)
+#    a.push(')', ')')
+#    return a
+#  end
 
   def is_lazy
     true
@@ -579,27 +569,25 @@ class ListGlispObject < GlispObject
     gl_list2(:evalresult, self)
   end
 
-=begin
-  def body_to_simple
-    if cdr.length == 0 then
-      car
-    else
-      gl_cons(:progn, self)
-    end
-  end
-
-  def eval_list_each(env, stack, step, level)
-    new_car, step, completed1 = car.eval(env, stack, step, level)
-    return [gl_cons(new_car, cdr), step, false] if step == 0
-    new_cdr, step, completed2 = cdr.eval_list_each(env, stack, step, level)
-    [gl_cons(new_car, new_cdr), step, completed1 && completed2]
-  end
-
-  def is_permanent_all
-    return false if not car.is_permanent
-    cdr.is_permanent_all
-  end
-=end
+#  def body_to_simple
+#    if cdr.length == 0 then
+#      car
+#    else
+#      gl_cons(:progn, self)
+#    end
+#  end
+#
+#  def eval_list_each(env, stack, step, level)
+#    new_car, step, completed1 = car.eval(env, stack, step, level)
+#    return [gl_cons(new_car, cdr), step, false] if step == 0
+#    new_cdr, step, completed2 = cdr.eval_list_each(env, stack, step, level)
+#    [gl_cons(new_car, new_cdr), step, completed1 && completed2]
+#  end
+#
+#  def is_permanent_all
+#    return false if not car.is_permanent
+#    cdr.is_permanent_all
+#  end
 
 end # ListGlispObject
 
@@ -655,64 +643,60 @@ class NilGlispObject < ListGlispObject
     self
   end
 
-=begin
-  def eval_list_each(env, stack, step, level)
-    [self, step, true]
-  end
-
-  def is_permanent_all
-    true
-  end
-=end
+#  def eval_list_each(env, stack, step, level)
+#    [self, step, true]
+#  end
+#
+#  def is_permanent_all
+#    true
+#  end
 
 end # NilGlispObject
 
-=begin
-# ListGlispObjectのサブクラスの中で NilGlispObject 以外のすべてで共通のスーパークラス
-class BasicConsGlispObject < ListGlispObject
-
-  def initialize
-  end
-
-  def eval_quote(env, stack, step, level, quote_depth)
-    sym = car_to_sym
-    value = cdr.car_or(nil)
-    if sym == :quote then
-      # eval から呼び出された最初は必ずこの分岐に入る
-      if value == nil then
-        return [gl_list(:throw,
-                        '\'Quote\' needs an argument.',
-                        :Exception), step - 1, true]
-      end
-      value, step, completed = value.eval_quote(env, stack, step, level, quote_depth + 1)
-      return [gl_list2(:quote, value), step, false] if step == 0 or not completed
-      return [value, step - 1, true] if quote_depth == 0
-      return [gl_list2(:quote, value), step, true]
-    elsif sym == :unquote then
-      if value == nil then
-        return [gl_list(:throw,
-                        '\'Unquote\' needs an argument.',
-                        :Exception), step - 1, true]
-      end
-      if quote_depth == 1 then
-        prev_step = step
-        value, step, completed = value.eval(env, stack, step, level)
-        return [gl_list2(:unquote, value), step, false] if step == 0 or not completed
-        return [value, step - 1, true]
-      else
-        value, step, completed = value.eval_quote(env, stack, step, level, quote_depth - 1)
-        return [gl_list2(:unquote, value), step, completed]
-      end
-    else
-      new_car, step, completed1 = car.eval_quote(env, stack, step, level, quote_depth)
-      return [gl_cons(new_car, cdr), step, false] if step == 0
-      new_cdr, step, completed2 = cdr.eval_quote(env, stack, step, level, quote_depth)
-      return [gl_cons(new_car, new_cdr), step, completed1 && completed2]
-    end
-  end
-
-end # BasicConsGlispObject
-=end
+## ListGlispObjectのサブクラスの中で NilGlispObject 以外のすべてで共通のスーパークラス
+#class BasicConsGlispObject < ListGlispObject
+#
+#  def initialize
+#  end
+#
+#  def eval_quote(env, stack, step, level, quote_depth)
+#    sym = car_to_sym
+#    value = cdr.car_or(nil)
+#    if sym == :quote then
+#      # eval から呼び出された最初は必ずこの分岐に入る
+#      if value == nil then
+#        return [gl_list(:throw,
+#                        '\'Quote\' needs an argument.',
+#                        :Exception), step - 1, true]
+#      end
+#      value, step, completed = value.eval_quote(env, stack, step, level, quote_depth + 1)
+#      return [gl_list2(:quote, value), step, false] if step == 0 or not completed
+#      return [value, step - 1, true] if quote_depth == 0
+#      return [gl_list2(:quote, value), step, true]
+#    elsif sym == :unquote then
+#      if value == nil then
+#        return [gl_list(:throw,
+#                        '\'Unquote\' needs an argument.',
+#                        :Exception), step - 1, true]
+#      end
+#      if quote_depth == 1 then
+#        prev_step = step
+#        value, step, completed = value.eval(env, stack, step, level)
+#        return [gl_list2(:unquote, value), step, false] if step == 0 or not completed
+#        return [value, step - 1, true]
+#      else
+#        value, step, completed = value.eval_quote(env, stack, step, level, quote_depth - 1)
+#        return [gl_list2(:unquote, value), step, completed]
+#      end
+#    else
+#      new_car, step, completed1 = car.eval_quote(env, stack, step, level, quote_depth)
+#      return [gl_cons(new_car, cdr), step, false] if step == 0
+#      new_cdr, step, completed2 = cdr.eval_quote(env, stack, step, level, quote_depth)
+#      return [gl_cons(new_car, new_cdr), step, completed1 && completed2]
+#    end
+#  end
+#
+#end # BasicConsGlispObject
 
 class ConsGlispObject < ListGlispObject
 
@@ -732,376 +716,373 @@ class ConsGlispObject < ListGlispObject
     @cdr
   end
 
-=begin
-  def eval(env, stack, step, level)
-
-    sym = car_to_sym
-
-    # 以下の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
-    # 手動で生成した場合はここで処理する
-
-    if sym == :"stack-push" then
-      second = cdr_or_nill.car_or_nill
-      name = second.car_or(nil)
-      value = second.cdr_or_nill.car_or(nil)
-      body = cdr_or_nill.cdr_or_nill.car_or(nil)
-      if name.is_symbol and value != nil and body != nil then
-        return StackPushGlispObject.new(name.symbol, value, body).
-          eval(env, stack, step, level)
-      end
-      return [gl_list(:throw,
-                      'Illegal stack-push operator.',
-                      :Exception), step - 1, true]
-    end
-
-    if sym == :"stack-get" then
-      index = cdr_or_nill.car_or(nil)
-      if index.is_a? NumberGlispObject and index.val.is_a? Integer then
-        return StackGetGlispObject.new(index.val).eval(env, stack, step, level)
-      end
-      return [gl_list(:throw,
-                      'Stack index needs Integer, but: %s' % [index],
-                      :Exception), step - 1, true]
-    end
-
-    if sym == :"global-get" then
-      name = cdr_or_nill.car_or(nil)
-      if name.is_symbol then
-        return GlobalGetGlispObject.new(name).eval(env, stack, step, level)
-      end
-      return [gl_list(:throw,
-                      'Global variable name needs Symbol, but: %s' % [name],
-                      :Exception), step - 1, true]
-    end
-
-    # 以上の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
-    # 手動で生成した場合はここで処理する
-
-    if sym == :car then
-      return _eval_car(env, stack, step, level)
-    end
-
-    if sym == :cdr then
-      return _eval_cdr(env, stack, step, level)
-    end
-
-    if sym == :cons then
-      return _eval_cons(env, stack, step, level)
-    end
-
-    if sym == :quote then
-      return eval_quote(env, stack, step, level, 0)
-    end
-
-    if sym == :"quote-all" then
-      return _eval_quote_all(env, stack, step, level)
-    end
-
-    if sym == :unquote then
-      return [gl_list(:throw,
-                      'Unexpected `unquote\'',
-                      :Exception), step - 1, true]
-    end
-
-    if sym == :func then
-      return _eval_func_def(env, stack, step, level)
-    end
-
-    if sym == :if then
-      return _eval_if(env, stack, step, level)
-    end
-
-    return _eval_func_call(env, stack, step, level)
-
-  end
-
-  # carが :car の場合に eval から呼び出される
-  def _eval_car(env, stack, step, level)
-    begin
-      [cdr.car.car, step - 1, true]
-    rescue
-      if cdr.car_or(nil) == nil then
-        return [gl_list(:throw,
-                        '\'Car\' needs an argument.',
-                        :Exception), step - 1, true]
-      else
-        return [gl_list(:throw,
-                        '\'Car\' needs list.',
-                        :Exception), step - 1, true]
-      end
-    end
-  end
-
-  # carが :cdr の場合に eval から呼び出される
-  def _eval_cdr(env, stack, step, level)
-    begin
-      [cdr.car.cdr, step - 1, true]
-    rescue
-      if cdr.car_or(nil) == nil then
-        return [gl_list(:throw,
-                        '\'Cdr\' needs an argument.',
-                        :Exception), step - 1, true]
-      else
-        return [gl_list(:throw,
-                        '\'Cdr\' needs list.',
-                        :Exception), step - 1, true]
-      end
-    end
-  end
-
-  def _eval_quote_all(env, stack, step, level)
-    begin
-      [cdr.car, step - 1, true]
-    rescue
-      return [gl_list(:throw,
-                      'Illegal quote-all operator.',
-                      :Exception), step - 1, true]
-    end
-  end
-
-  def _eval_func_call(env, stack, step, level)
-    new_car, step, completed = car.eval(env, stack, step, level)
-    return [gl_cons(new_car, cdr), step, false] if step == 0
-    if not completed then
-      args = cdr
-      if level != EVAL_FINAL then
-        args, step, completed = args.eval_list_each(env, stack, step, level)
-      end
-      return [gl_cons(new_car, args), step, false]
-    end
-    if new_car.is_a? ProcGlispObject then
-      return new_car.eval_func_call(cdr, env, stack, step, level)
-    elsif new_car.is_a? ListGlispObject then
-      return new_car._eval_lisp_func_call(cdr, env, stack, step, level)
-    elsif level != EVAL_FINAL then
-      return [gl_cons(new_car, cdr), step, false]
-    else
-      return [gl_list(:throw,
-                      'Not function.',
-                      :Exception), step - 1, true]
-    end
-  end
-
-  def _eval_lisp_func_call(args, env, stack, step, level)
-    args = _args_to_lazy_if_need(args, stack)
-    vargs = cdr_or_nill.car_or_nill
-    body = cdr_or_nill.cdr_or_nill.car_or(nil)
-    c = _count_vargs(vargs)
-    step = step - 1
-    return [_create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)),
-            step, false] if step == 0
-    new_stack = _push_args_to_stack(new_stack, vargs, args)
-    body, step, completed = body.eval(env, new_stack, step, level)
-    return [_create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)),
-            step, false] if step == 0 or not completed
-    return _create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)).
-      eval(env, stack, step, level) if step < c
-    step = step - c
-    [body, step, true]
-  end
-
-  def _args_to_lazy_if_need(args, stack)
-    if args.is_nil then
-      return args
-    end
-    b = _args_to_lazy_if_need(args.cdr, stack)
-    a = args.car
-    if not a.is_permanent then
-      a = LazyEvalGlispObject.new(a, stack)
-    end
-    gl_cons(a, b)
-  end
-
-  def _args_from_lazy(args)
-    if args.is_nil then
-      return args
-    end
-    b = _args_from_lazy(args.cdr)
-    a = args.car
-    if a.is_lazy then
-      a = a.body
-    end
-    gl_cons(a, b)
-  end
-
-  def _create_expr_push_args_to_stack(expr, vargs, args)
-    v = vargs.car_or(nil)
-    if v == nil then
-      return expr
-    end
-    begin
-      a = args.car
-      b = args.cdr
-    rescue
-      a = gl_nill
-      b = a
-    end
-    if v.is_symbol then
-      expr = StackPushGlispObject.new(v, a, expr)
-    end
-    _create_expr_push_args_to_stack(expr, vargs.cdr, b)
-  end
-
-  def _push_args_to_stack(stack, vargs, args)
-    v = vargs.car_or(nil)
-    if v == nil then
-      return stack
-    end
-    begin
-      a = args.car
-      b = args.cdr
-    rescue
-      a = gl_nill
-      b = a
-    end
-    if v.is_symbol then
-      stack = gl_cons(gl_list2(a, v), stack)
-    end
-    _push_args_to_stack(stack, vargs.cdr, b)
-  end
-
-  def _count_vargs(vargs)
-    v = vargs.car_or(nil)
-    if v == nil then
-      return 0
-    end
-    if v.is_symbol then
-      return _count_vargs(vargs.cdr) + 1
-    end
-    _count_vargs(vargs.cdr)
-  end
-
-  # carが :if の場合に eval から呼び出される
-  def _eval_if(env, stack, step, level)
-
-    cond      = cdr_or_nill.car_or(nil)
-
-    if cond == nil then
-      return [gl_list(:throw,
-                      'Illegal if operator.',
-                      :Exception), step - 1, true]
-    end
-
-    cond, step, completed = cond.eval(env, stack, step, level)
-    return [gl_cons(:if, gl_cons(cond, cdr_or_nill.cdr_or_nill)),
-            step, false] if step == 0 or not completed
-
-    if cond.to_boolean then
-      begin
-        then_expr = cdr_or_nill.cdr_or_nill.car
-        step = step - 1
-        return [then_expr, step, false] if step == 0
-        return then_expr.eval(env, stack, step, level)
-      rescue
-        return [gl_list(:throw,
-                        'Illegal if operator.',
-                        :Exception), step - 1, true]
-      end
-    else
-      begin
-        else_expr = cdr_or_nill.cdr_or_nill.cdr_or_nill.car
-        step = step - 1
-        return [else_expr, step, false] if step == 0
-        return else_expr.eval(env, stack, step, level)
-      rescue
-        return [gl_list(:throw,
-                        'Illegal if operator.',
-                        :Exception), step - 1, true]
-      end
-    end
-
-  end
-
-  def _eval_func_def(env, stack, step, level)
-
-    vargs = cdr_or_nill.car_or(nil)
-    body = cdr_or_nill.cdr_or_nill.car_or(nil)
-
-    stack = _push_vargs_to_stack(stack, vargs)
-
-    prev_step = step
-    body, step, completed = body.eval(env, stack, step, EVAL_FUNCTION_DEFINITION)
-    return [gl_list(:func, vargs, body), step, false] if step == 0
-    return [gl_list(:func, vargs, body), step, true]
-
-  end
-
-  def _push_vargs_to_stack(stack, vargs)
-    v = vargs.car_or(nil)
-    if v == nil then
-      return stack
-    end
-    stack = _push_vargs_to_stack(stack, vargs.cdr)
-    if not v.is_symbol then
-      return stack
-    end
-    gl_cons(gl_list2(UNDEFINED, v), stack)
-  end
-
-  def eval_force
-    sym = car_to_sym
-    if sym == :"quote-all" then
-      begin
-        cdr.car
-      rescue
-        self
-      end
-    else
-      self
-    end
-  end
-=end
+#  def eval(env, stack, step, level)
+#
+#    sym = car_to_sym
+#
+#    # 以下の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
+#    # 手動で生成した場合はここで処理する
+#
+#    if sym == :"stack-push" then
+#      second = cdr_or_nill.car_or_nill
+#      name = second.car_or(nil)
+#      value = second.cdr_or_nill.car_or(nil)
+#      body = cdr_or_nill.cdr_or_nill.car_or(nil)
+#      if name.is_symbol and value != nil and body != nil then
+#        return StackPushGlispObject.new(name.symbol, value, body).
+#          eval(env, stack, step, level)
+#      end
+#      return [gl_list(:throw,
+#                      'Illegal stack-push operator.',
+#                      :Exception), step - 1, true]
+#    end
+#
+#    if sym == :"stack-get" then
+#      index = cdr_or_nill.car_or(nil)
+#      if index.is_a? NumberGlispObject and index.val.is_a? Integer then
+#        return StackGetGlispObject.new(index.val).eval(env, stack, step, level)
+#      end
+#      return [gl_list(:throw,
+#                      'Stack index needs Integer, but: %s' % [index],
+#                      :Exception), step - 1, true]
+#    end
+#
+#    if sym == :"global-get" then
+#      name = cdr_or_nill.car_or(nil)
+#      if name.is_symbol then
+#        return GlobalGetGlispObject.new(name).eval(env, stack, step, level)
+#      end
+#      return [gl_list(:throw,
+#                      'Global variable name needs Symbol, but: %s' % [name],
+#                      :Exception), step - 1, true]
+#    end
+#
+#    # 以上の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
+#    # 手動で生成した場合はここで処理する
+#
+#    if sym == :car then
+#      return _eval_car(env, stack, step, level)
+#    end
+#
+#    if sym == :cdr then
+#      return _eval_cdr(env, stack, step, level)
+#    end
+#
+#    if sym == :cons then
+#      return _eval_cons(env, stack, step, level)
+#    end
+#
+#    if sym == :quote then
+#      return eval_quote(env, stack, step, level, 0)
+#    end
+#
+#    if sym == :"quote-all" then
+#      return _eval_quote_all(env, stack, step, level)
+#    end
+#
+#    if sym == :unquote then
+#      return [gl_list(:throw,
+#                      'Unexpected `unquote\'',
+#                      :Exception), step - 1, true]
+#    end
+#
+#    if sym == :func then
+#      return _eval_func_def(env, stack, step, level)
+#    end
+#
+#    if sym == :if then
+#      return _eval_if(env, stack, step, level)
+#    end
+#
+#    return _eval_func_call(env, stack, step, level)
+#
+#  end
+#
+#  # carが :car の場合に eval から呼び出される
+#  def _eval_car(env, stack, step, level)
+#    begin
+#      [cdr.car.car, step - 1, true]
+#    rescue
+#      if cdr.car_or(nil) == nil then
+#        return [gl_list(:throw,
+#                        '\'Car\' needs an argument.',
+#                        :Exception), step - 1, true]
+#      else
+#        return [gl_list(:throw,
+#                        '\'Car\' needs list.',
+#                        :Exception), step - 1, true]
+#      end
+#    end
+#  end
+#
+#  # carが :cdr の場合に eval から呼び出される
+#  def _eval_cdr(env, stack, step, level)
+#    begin
+#      [cdr.car.cdr, step - 1, true]
+#    rescue
+#      if cdr.car_or(nil) == nil then
+#        return [gl_list(:throw,
+#                        '\'Cdr\' needs an argument.',
+#                        :Exception), step - 1, true]
+#      else
+#        return [gl_list(:throw,
+#                        '\'Cdr\' needs list.',
+#                        :Exception), step - 1, true]
+#      end
+#    end
+#  end
+#
+#  def _eval_quote_all(env, stack, step, level)
+#    begin
+#      [cdr.car, step - 1, true]
+#    rescue
+#      return [gl_list(:throw,
+#                      'Illegal quote-all operator.',
+#                      :Exception), step - 1, true]
+#    end
+#  end
+#
+#  def _eval_func_call(env, stack, step, level)
+#    new_car, step, completed = car.eval(env, stack, step, level)
+#    return [gl_cons(new_car, cdr), step, false] if step == 0
+#    if not completed then
+#      args = cdr
+#      if level != EVAL_FINAL then
+#        args, step, completed = args.eval_list_each(env, stack, step, level)
+#      end
+#      return [gl_cons(new_car, args), step, false]
+#    end
+#    if new_car.is_a? ProcGlispObject then
+#      return new_car.eval_func_call(cdr, env, stack, step, level)
+#    elsif new_car.is_a? ListGlispObject then
+#      return new_car._eval_lisp_func_call(cdr, env, stack, step, level)
+#    elsif level != EVAL_FINAL then
+#      return [gl_cons(new_car, cdr), step, false]
+#    else
+#      return [gl_list(:throw,
+#                      'Not function.',
+#                      :Exception), step - 1, true]
+#    end
+#  end
+#
+#  def _eval_lisp_func_call(args, env, stack, step, level)
+#    args = _args_to_lazy_if_need(args, stack)
+#    vargs = cdr_or_nill.car_or_nill
+#    body = cdr_or_nill.cdr_or_nill.car_or(nil)
+#    c = _count_vargs(vargs)
+#    step = step - 1
+#    return [_create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)),
+#            step, false] if step == 0
+#    new_stack = _push_args_to_stack(new_stack, vargs, args)
+#    body, step, completed = body.eval(env, new_stack, step, level)
+#    return [_create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)),
+#            step, false] if step == 0 or not completed
+#    return _create_expr_push_args_to_stack(body, vargs, _args_from_lazy(args)).
+#      eval(env, stack, step, level) if step < c
+#    step = step - c
+#    [body, step, true]
+#  end
+#
+#  def _args_to_lazy_if_need(args, stack)
+#    if args.is_nil then
+#      return args
+#    end
+#    b = _args_to_lazy_if_need(args.cdr, stack)
+#    a = args.car
+#    if not a.is_permanent then
+#      a = LazyEvalGlispObject.new(a, stack)
+#    end
+#    gl_cons(a, b)
+#  end
+#
+#  def _args_from_lazy(args)
+#    if args.is_nil then
+#      return args
+#    end
+#    b = _args_from_lazy(args.cdr)
+#    a = args.car
+#    if a.is_lazy then
+#      a = a.body
+#    end
+#    gl_cons(a, b)
+#  end
+#
+#  def _create_expr_push_args_to_stack(expr, vargs, args)
+#    v = vargs.car_or(nil)
+#    if v == nil then
+#      return expr
+#    end
+#    begin
+#      a = args.car
+#      b = args.cdr
+#    rescue
+#      a = gl_nill
+#      b = a
+#    end
+#    if v.is_symbol then
+#      expr = StackPushGlispObject.new(v, a, expr)
+#    end
+#    _create_expr_push_args_to_stack(expr, vargs.cdr, b)
+#  end
+#
+#  def _push_args_to_stack(stack, vargs, args)
+#    v = vargs.car_or(nil)
+#    if v == nil then
+#      return stack
+#    end
+#    begin
+#      a = args.car
+#      b = args.cdr
+#    rescue
+#      a = gl_nill
+#      b = a
+#    end
+#    if v.is_symbol then
+#      stack = gl_cons(gl_list2(a, v), stack)
+#    end
+#    _push_args_to_stack(stack, vargs.cdr, b)
+#  end
+#
+#  def _count_vargs(vargs)
+#    v = vargs.car_or(nil)
+#    if v == nil then
+#      return 0
+#    end
+#    if v.is_symbol then
+#      return _count_vargs(vargs.cdr) + 1
+#    end
+#    _count_vargs(vargs.cdr)
+#  end
+#
+#  # carが :if の場合に eval から呼び出される
+#  def _eval_if(env, stack, step, level)
+#
+#    cond      = cdr_or_nill.car_or(nil)
+#
+#    if cond == nil then
+#      return [gl_list(:throw,
+#                      'Illegal if operator.',
+#                      :Exception), step - 1, true]
+#    end
+#
+#    cond, step, completed = cond.eval(env, stack, step, level)
+#    return [gl_cons(:if, gl_cons(cond, cdr_or_nill.cdr_or_nill)),
+#            step, false] if step == 0 or not completed
+#
+#    if cond.to_boolean then
+#      begin
+#        then_expr = cdr_or_nill.cdr_or_nill.car
+#        step = step - 1
+#        return [then_expr, step, false] if step == 0
+#        return then_expr.eval(env, stack, step, level)
+#      rescue
+#        return [gl_list(:throw,
+#                        'Illegal if operator.',
+#                        :Exception), step - 1, true]
+#      end
+#    else
+#      begin
+#        else_expr = cdr_or_nill.cdr_or_nill.cdr_or_nill.car
+#        step = step - 1
+#        return [else_expr, step, false] if step == 0
+#        return else_expr.eval(env, stack, step, level)
+#      rescue
+#        return [gl_list(:throw,
+#                        'Illegal if operator.',
+#                        :Exception), step - 1, true]
+#      end
+#    end
+#
+#  end
+#
+#  def _eval_func_def(env, stack, step, level)
+#
+#    vargs = cdr_or_nill.car_or(nil)
+#    body = cdr_or_nill.cdr_or_nill.car_or(nil)
+#
+#    stack = _push_vargs_to_stack(stack, vargs)
+#
+#    prev_step = step
+#    body, step, completed = body.eval(env, stack, step, EVAL_FUNCTION_DEFINITION)
+#    return [gl_list(:func, vargs, body), step, false] if step == 0
+#    return [gl_list(:func, vargs, body), step, true]
+#
+#  end
+#
+#  def _push_vargs_to_stack(stack, vargs)
+#    v = vargs.car_or(nil)
+#    if v == nil then
+#      return stack
+#    end
+#    stack = _push_vargs_to_stack(stack, vargs.cdr)
+#    if not v.is_symbol then
+#      return stack
+#    end
+#    gl_cons(gl_list2(UNDEFINED, v), stack)
+#  end
+#
+#  def eval_force
+#    sym = car_to_sym
+#    if sym == :"quote-all" then
+#      begin
+#        cdr.car
+#      rescue
+#        self
+#      end
+#    else
+#      self
+#    end
+#  end
+#=end
 
 end # ConsGlispObject
 
-=begin
-class StackPushGlispObject < BasicConsGlispObject
-
-  @@symbolObj = SymbolGlispObject.new(:"stack-push")
-
-  # nameはRubyプリミティブのシンボル
-  def initialize(name, value, body)
-    @name = name
-    @value = value
-    @body = body
-  end
-
-  def car
-    @@symbolObj
-  end
-
-  def cdr
-    gl_list2(gl_list2(@name, @value), @body)
-  end
-
-  def is_permanent
-    false
-  end
-
-  def eval(env, stack, step, level)
-
-    if @value.is_permanent then
-      lazy = nil
-      new_stack = gl_cons(gl_list2(@value, @name), stack)
-    else
-      lazy = LazyEvalGlispObject.new(@value, stack)
-      new_stack = gl_cons(gl_list2(lazy, @name), stack)
-    end
-
-    new_body, step, completed = @body.eval(env, new_stack, step, level)
-    if lazy == nil then
-      new_value = @value
-    else
-      new_value = lazy.body
-    end
-    return [StackPushGlispObject.new(@name, new_value, new_body),
-            step, false]  if step == 0 or not completed
-    [new_body, step - 1, true]
-
-  end
-
-end # StackPushGlispObject
-=end
+#class StackPushGlispObject < BasicConsGlispObject
+#
+#  @@symbolObj = SymbolGlispObject.new(:"stack-push")
+#
+#  # nameはRubyプリミティブのシンボル
+#  def initialize(name, value, body)
+#    @name = name
+#    @value = value
+#    @body = body
+#  end
+#
+#  def car
+#    @@symbolObj
+#  end
+#
+#  def cdr
+#    gl_list2(gl_list2(@name, @value), @body)
+#  end
+#
+#  def is_permanent
+#    false
+#  end
+#
+#  def eval(env, stack, step, level)
+#
+#    if @value.is_permanent then
+#      lazy = nil
+#      new_stack = gl_cons(gl_list2(@value, @name), stack)
+#    else
+#      lazy = LazyEvalGlispObject.new(@value, stack)
+#      new_stack = gl_cons(gl_list2(lazy, @name), stack)
+#    end
+#
+#    new_body, step, completed = @body.eval(env, new_stack, step, level)
+#    if lazy == nil then
+#      new_value = @value
+#    else
+#      new_value = lazy.body
+#    end
+#    return [StackPushGlispObject.new(@name, new_value, new_body),
+#            step, false]  if step == 0 or not completed
+#    [new_body, step - 1, true]
+#
+#  end
+#
+#end # StackPushGlispObject
 
 class StackGetGlispObject < ListGlispObject
 
