@@ -30,7 +30,7 @@ def gl_create(rubyObj)
   elsif rubyObj == nil then
     gl_nil
   else
-    raise Exception, rubyObj.inspect
+    raise RuntimeError, rubyObj.inspect
   end
 end
 
@@ -78,13 +78,13 @@ end
 class GlispObject
 
   def ==(other)
-    raise Exception
+    raise RuntimeError
     # 各サブクラスで再実装している
     # ただし、ListGlispObject のサブクラスでは再実装していない
   end
 
   def to_rubyObj
-    raise Exception
+    raise RuntimeError
     # 各サブクラスで再実装している
     # ただし、ListGlispObject のサブクラスでは再実装していない
   end
@@ -95,13 +95,13 @@ class GlispObject
 
   # 文字列表現のもととなる文字列の配列を返す
   def to_ss
-    raise Exception
+    raise RuntimeError
     # 各サブクラスで再実装している
     # ただし、ListGlispObject のサブクラスのうち NilGlispObject 以外では再実装していない
   end
 
   def to_ss_internal
-    raise Exception
+    raise RuntimeError
     # ListGlispObject, NilGlispObject で再実装している
   end
 
@@ -111,7 +111,7 @@ class GlispObject
   end
 
   def is_nil
-    raise Exception
+    raise RuntimeError
     # ListGlispObject, NilGlispObject で再実装している
   end
 
@@ -126,7 +126,7 @@ class GlispObject
   end
 
   def integer
-    raise Exception
+    raise RuntimeError
     # IntegerGlispObject で再実装している
   end
 
@@ -141,7 +141,7 @@ class GlispObject
   end
 
   def symbol
-    raise Exception
+    raise RuntimeError
     # SymbolGlispObject で再実装している
   end
 
@@ -159,17 +159,17 @@ class GlispObject
   end
 
   def length
-    raise Exception
+    raise RuntimeError
     # ListGlispObject, NilGlispObject で再実装している
   end
 
   def car
-    raise Exception
+    raise RuntimeError
     # ListGlispObject のサブクラスのうち NilGlispObject 以外で再実装している
   end
 
   def cdr
-    raise Exception
+    raise RuntimeError
     # ListGlispObject のサブクラスのうち NilGlispObject 以外で再実装している
   end
 
@@ -236,7 +236,7 @@ class GlispObject
 
   # Rubyの配列に変換する
   def to_list
-    raise Exception
+    raise RuntimeError
     # ListGlispObject, NilGlispObject で再実装している
   end
 
@@ -260,6 +260,7 @@ class GlispObject
   # 返り値は [結果, step]。
   def eval(env, stack, step, level)
     [self, step]
+    # SymbolGlispObject, ListGlispObject のサブクラスで再実装している
   end
 
   # 返り値は eval と同じ仕様
@@ -270,6 +271,7 @@ class GlispObject
   # 返り値は eval と同じ仕様
   def eval_func_call(env, stack, step, level, args)
     [self, step]
+    # ProcGlispObject, NilGlispObject, ConsGlispObject で再実装している
   end
 
   # 以下はlistについてのメソッド
@@ -469,7 +471,8 @@ class ProcGlispObject < GlispObject
     @can_calc_on_compile
   end
 
-#  def eval_func_call(args, env, stack, step, level)
+  def eval_func_call(args, env, stack, step, level)
+    raise Exception # TODO
 #    args, step, completed = args.eval_list_each(env, stack, step, level)
 #    return [gl_cons(self, args), step, false] if step == 0 or not completed
 #    return [gl_cons(self, args), step, false] if level != EVAL_FINAL and not can_calc_on_compile
@@ -480,7 +483,7 @@ class ProcGlispObject < GlispObject
 #                      '[%s] %s' % [e.class, e.message],
 #                      :Exception), step - 1, true]
 #    end
-#  end
+  end
 
 end # ProcGlispObject
 
@@ -603,9 +606,9 @@ class ListGlispObject < GlispObject
 
   def decode
     if car_symbol != :evalresult then
-      raise Exception
+      raise RuntimeError
     end
-    cdr
+    cadr # ここで例外は発生しないはず
   end
 
   def encode
@@ -682,6 +685,14 @@ class NilGlispObject < ListGlispObject
     self
   end
 
+  def eval(env, stack, step, level, args)
+    [self, step]
+  end
+
+  def eval_func_call(env, stack, step, level, args)
+    [self, step]
+  end
+
   def eval_each(env, stack, step, level)
     [self, step]
   end
@@ -743,7 +754,7 @@ class ConsGlispObject < ListGlispObject
     @car = gl_create(car)
     @cdr = gl_create(cdr)
     if not @cdr.is_list then
-      raise Exception
+      raise RuntimeError
     end
   end
 
@@ -799,6 +810,10 @@ class ConsGlispObject < ListGlispObject
     # 以上の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
     # 手動で生成した場合はここで処理する
 
+    if sym == :"evalresult" then
+      return [self, step]
+    end
+
     if sym == :car then
       return _eval_car(env, stack, step, level)
     end
@@ -814,11 +829,7 @@ class ConsGlispObject < ListGlispObject
 #    if sym == :quote then
 #      return eval_quote(env, stack, step, level, 0)
 #    end
-#
-#    if sym == :"quote-all" then
-#      return _eval_quote_all(env, stack, step, level)
-#    end
-#
+
 #    if sym == :unquote then
 #      return [gl_list(:throw,
 #                      'Unexpected `unquote\'',
@@ -832,10 +843,18 @@ class ConsGlispObject < ListGlispObject
 #    if sym == :if then
 #      return _eval_if(env, stack, step, level)
 #    end
-#
-#    return _eval_func_call(env, stack, step, level)
 
-    return [gl_list2(:evalresult, self), step - 1] # TODO
+    new_car, step = car.eval(env, stack, step, level)
+    args = cdr
+    return [gl_cons(new_car, args), step, false] if step == 0
+    if not new_car.is_permanent then
+      if level != EVAL_FINAL then
+        args, step = args.eval_each(env, stack, step, level)
+      end
+      return [gl_cons(new_car, args), step, false]
+    end
+
+    return new_car.eval_func_call(env, stack, step, level, args)
 
   end
 
@@ -890,31 +909,9 @@ class ConsGlispObject < ListGlispObject
 #                      :Exception), step - 1, true]
 #    end
 #  end
-#
-#  def _eval_func_call(env, stack, step, level)
-#    new_car, step, completed = car.eval(env, stack, step, level)
-#    return [gl_cons(new_car, cdr), step, false] if step == 0
-#    if not completed then
-#      args = cdr
-#      if level != EVAL_FINAL then
-#        args, step, completed = args.eval_list_each(env, stack, step, level)
-#      end
-#      return [gl_cons(new_car, args), step, false]
-#    end
-#    if new_car.is_a? ProcGlispObject then
-#      return new_car.eval_func_call(cdr, env, stack, step, level)
-#    elsif new_car.is_a? ListGlispObject then
-#      return new_car._eval_lisp_func_call(cdr, env, stack, step, level)
-#    elsif level != EVAL_FINAL then
-#      return [gl_cons(new_car, cdr), step, false]
-#    else
-#      return [gl_list(:throw,
-#                      'Not function.',
-#                      :Exception), step - 1, true]
-#    end
-#  end
-#
-#  def _eval_lisp_func_call(args, env, stack, step, level)
+
+  def eval_func_call(env, stack, step, level, args)
+    raise Exception # TODO
 #    args = _args_to_lazy_if_need(args, stack)
 #    vargs = cdr_or_nill.car_or_nill
 #    body = cdr_or_nill.cdr_or_nill.car_or(nil)
@@ -930,8 +927,8 @@ class ConsGlispObject < ListGlispObject
 #      eval(env, stack, step, level) if step < c
 #    step = step - c
 #    [body, step, true]
-#  end
-#
+  end
+
 #  def _args_to_lazy_if_need(args, stack)
 #    if args.is_nil then
 #      return args
@@ -1069,20 +1066,6 @@ class ConsGlispObject < ListGlispObject
 #    end
 #    gl_cons(gl_list2(UNDEFINED, v), stack)
 #  end
-#
-#  def eval_force
-#    sym = car_to_sym
-#    if sym == :"quote-all" then
-#      begin
-#        cdr.car
-#      rescue
-#        self
-#      end
-#    else
-#      self
-#    end
-#  end
-#=end
 
 end # ConsGlispObject
 
@@ -1415,9 +1398,9 @@ def do_test
                '2',
               ])
 
-  do_test_sub(env, "(cdr (2 3 4))",
+  do_test_sub(env, "(cdr (evalresult (2 3 4)))",
               [
-               '( cdr ( 2 3 4 ) )',
+               '( cdr ( evalresult ( 2 3 4 ) ) )',
                '( evalresult ( 3 4 ) )',
               ])
 
