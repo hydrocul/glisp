@@ -52,7 +52,7 @@ end
 
 def gl_list(*x)
   if x.empty? then
-    gl_nill
+    gl_nil
   else
     gl_cons(x[0], gl_list(*x[1..-1]))
   end
@@ -175,6 +175,7 @@ class GlispObject
 
   def car_or(default)
     default
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
   def car_symbol
@@ -183,10 +184,11 @@ class GlispObject
 
   def cdr_or(default)
     default
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
   def caar
-    car_or(gl_nil).car
+    car.car
   end
 
   def caar_or(default)
@@ -197,8 +199,20 @@ class GlispObject
     car_or(gl_nil).cdr_or(gl_nil).car_or(default)
   end
 
+  def cadr
+    cdr.car
+  end
+
   def cadr_or(default)
     cdr_or(gl_nil).car_or(default)
+  end
+
+  def caadr
+    cdr.car.car
+  end
+
+  def cdadr
+    cdr.car.cdr
   end
 
   def caddr_or(default)
@@ -251,6 +265,27 @@ class GlispObject
   # 返り値は eval と同じ仕様
   def eval_quote(env, stack, step, level, quote_depth)
     [self, step]
+  end
+
+  # 返り値は eval と同じ仕様
+  def eval_func_call(env, stack, step, level, args)
+    [self, step]
+  end
+
+  # 以下はlistについてのメソッド
+
+  def eval_each(env, stack, step, level)
+    new_car, step = car.eval(env, stack, step, level)
+    return [gl_cons(new_car, cdr), step] if step == 0
+    new_cdr, step = cdr.list_eval_each(env, stack, step, level)
+    [gl_cons(new_car, new_cdr), step]
+    # NilGlispObject で再実装している
+  end
+
+  def is_permanent_all
+    return false if not car.is_permanent
+    cdr.is_permanent_all
+    # NilGlispObject で再実装している
   end
 
 end # GlispObject
@@ -522,6 +557,14 @@ class ListGlispObject < GlispObject
     cdr.length + 1
   end
 
+  def car_or(default)
+    car
+  end
+
+  def cdr_or(default)
+    cdr
+  end
+
   def get_by_index(index)
     if index == 0 then
       [true, car]
@@ -576,18 +619,6 @@ class ListGlispObject < GlispObject
 #      gl_cons(:progn, self)
 #    end
 #  end
-#
-#  def eval_list_each(env, stack, step, level)
-#    new_car, step, completed1 = car.eval(env, stack, step, level)
-#    return [gl_cons(new_car, cdr), step, false] if step == 0
-#    new_cdr, step, completed2 = cdr.eval_list_each(env, stack, step, level)
-#    [gl_cons(new_car, new_cdr), step, completed1 && completed2]
-#  end
-#
-#  def is_permanent_all
-#    return false if not car.is_permanent
-#    cdr.is_permanent_all
-#  end
 
 end # ListGlispObject
 
@@ -619,6 +650,14 @@ class NilGlispObject < ListGlispObject
     0
   end
 
+  def car_or(default)
+    default
+  end
+
+  def cdr_or(default)
+    default
+  end
+
   def get_by_index(index)
     [false, nil]
   end
@@ -643,13 +682,13 @@ class NilGlispObject < ListGlispObject
     self
   end
 
-#  def eval_list_each(env, stack, step, level)
-#    [self, step, true]
-#  end
-#
-#  def is_permanent_all
-#    true
-#  end
+  def eval_each(env, stack, step, level)
+    [self, step]
+  end
+
+  def is_permanent_all
+    true
+  end
 
 end # NilGlispObject
 
@@ -716,13 +755,13 @@ class ConsGlispObject < ListGlispObject
     @cdr
   end
 
-#  def eval(env, stack, step, level)
-#
-#    sym = car_to_sym
-#
-#    # 以下の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
-#    # 手動で生成した場合はここで処理する
-#
+  def eval(env, stack, step, level)
+
+    sym = car_symbol
+
+    # 以下の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
+    # 手動で生成した場合はここで処理する
+
 #    if sym == :"stack-push" then
 #      second = cdr_or_nill.car_or_nill
 #      name = second.car_or(nil)
@@ -736,38 +775,38 @@ class ConsGlispObject < ListGlispObject
 #                      'Illegal stack-push operator.',
 #                      :Exception), step - 1, true]
 #    end
-#
-#    if sym == :"stack-get" then
-#      index = cdr_or_nill.car_or(nil)
-#      if index.is_a? NumberGlispObject and index.val.is_a? Integer then
-#        return StackGetGlispObject.new(index.val).eval(env, stack, step, level)
-#      end
-#      return [gl_list(:throw,
-#                      'Stack index needs Integer, but: %s' % [index],
-#                      :Exception), step - 1, true]
-#    end
-#
-#    if sym == :"global-get" then
-#      name = cdr_or_nill.car_or(nil)
-#      if name.is_symbol then
-#        return GlobalGetGlispObject.new(name).eval(env, stack, step, level)
-#      end
-#      return [gl_list(:throw,
-#                      'Global variable name needs Symbol, but: %s' % [name],
-#                      :Exception), step - 1, true]
-#    end
-#
-#    # 以上の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
-#    # 手動で生成した場合はここで処理する
-#
-#    if sym == :car then
-#      return _eval_car(env, stack, step, level)
-#    end
-#
-#    if sym == :cdr then
-#      return _eval_cdr(env, stack, step, level)
-#    end
-#
+
+    if sym == :"stack-get" then
+      index = cardr_or(nil)
+      if integer != nil && index.is_integer then
+        return StackGetGlispObject.new(index.integer).eval(env, stack, step, level)
+      end
+      return [gl_list(:throw,
+                      'Stack index needs Integer, but: %s' % [index],
+                      :Exception), step - 1]
+    end
+
+    if sym == :"global-get" then
+      name = carr_or(nil)
+      if name != nil && name.is_symbol then
+        return GlobalGetGlispObject.new(name).eval(env, stack, step, level)
+      end
+      return [gl_list(:throw,
+                      'Global variable name needs Symbol, but: %s' % [name],
+                      :Exception), step - 1]
+    end
+
+    # 以上の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
+    # 手動で生成した場合はここで処理する
+
+    if sym == :car then
+      return _eval_car(env, stack, step, level)
+    end
+
+    if sym == :cdr then
+      return _eval_cdr(env, stack, step, level)
+    end
+
 #    if sym == :cons then
 #      return _eval_cons(env, stack, step, level)
 #    end
@@ -795,43 +834,53 @@ class ConsGlispObject < ListGlispObject
 #    end
 #
 #    return _eval_func_call(env, stack, step, level)
-#
-#  end
-#
-#  # carが :car の場合に eval から呼び出される
-#  def _eval_car(env, stack, step, level)
-#    begin
-#      [cdr.car.car, step - 1, true]
-#    rescue
-#      if cdr.car_or(nil) == nil then
-#        return [gl_list(:throw,
-#                        '\'Car\' needs an argument.',
-#                        :Exception), step - 1, true]
-#      else
-#        return [gl_list(:throw,
-#                        '\'Car\' needs list.',
-#                        :Exception), step - 1, true]
-#      end
-#    end
-#  end
-#
-#  # carが :cdr の場合に eval から呼び出される
-#  def _eval_cdr(env, stack, step, level)
-#    begin
-#      [cdr.car.cdr, step - 1, true]
-#    rescue
-#      if cdr.car_or(nil) == nil then
-#        return [gl_list(:throw,
-#                        '\'Cdr\' needs an argument.',
-#                        :Exception), step - 1, true]
-#      else
-#        return [gl_list(:throw,
-#                        '\'Cdr\' needs list.',
-#                        :Exception), step - 1, true]
-#      end
-#    end
-#  end
-#
+
+    return [gl_list2(:evalresult, self), step - 1] # TODO
+
+  end
+
+  # carが :car の場合に eval から呼び出される
+  def _eval_car(env, stack, step, level)
+    begin
+      arg = cadr
+    rescue
+      return [gl_list(:throw,
+                      '\'Car\' needs an argument.',
+                      :Exception), step - 1]
+    end
+    arg, step = arg.eval(env, stack, step, level)
+    return [gl_list2(:car, arg), step] if step == 0 or not arg.is_permanent
+    step = step - 1
+    begin
+      return [arg.decode.car.encode, step]
+    rescue
+      return [gl_list(:throw,
+                      '\'Car\' needs a list argument.',
+                      :Exception), step - 1]
+    end
+  end
+
+  # carが :cdr の場合に eval から呼び出される
+  def _eval_cdr(env, stack, step, level)
+    begin
+      arg = cadr
+    rescue
+      return [gl_list(:throw,
+                      '\'Cdr\' needs an argument.',
+                      :Exception), step - 1]
+    end
+    arg, step = arg.eval(env, stack, step, level)
+    return [gl_list2(:cdr, arg), step] if step == 0 or not arg.is_permanent
+    step = step - 1
+    begin
+      return [arg.decode.cdr.encode, step]
+    rescue
+      return [gl_list(:throw,
+                      '\'Cdr\' needs a list argument.',
+                      :Exception), step - 1]
+    end
+  end
+
 #  def _eval_quote_all(env, stack, step, level)
 #    begin
 #      [cdr.car, step - 1, true]
@@ -1358,6 +1407,18 @@ def do_test
   do_test_sub(env, "true",
               [
                'true',
+              ])
+
+  do_test_sub(env, "(car (evalresult (2 3 4)))",
+              [
+               '( car ( evalresult ( 2 3 4 ) ) )',
+               '2',
+              ])
+
+  do_test_sub(env, "(cdr (2 3 4))",
+              [
+               '( cdr ( 2 3 4 ) )',
+               '( evalresult ( 3 4 ) )',
               ])
 
   do_test_sub(env, "(+ 2 3)",
