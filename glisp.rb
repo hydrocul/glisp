@@ -264,9 +264,10 @@ class GlispObject
     # SymbolGlispObject, ListGlispObject のサブクラスで再実装している
   end
 
-  # 返り値は eval と同じ仕様
+  # 返り値は [結果, step, 評価が完了しているかどうか]。
   def eval_quote(env, stack, step, level, quote_depth)
-    [self, step]
+    [self, step, true]
+    # ListGlispObject, NilGlispObject で再実装している
   end
 
   # 返り値は eval と同じ仕様
@@ -519,6 +520,7 @@ end # LazyEvalGlispObject
 class ListGlispObject < GlispObject
 
   def ==(other)
+    return false if other == nil
     return false if not other.is_list
     return true if other.is_nil and self.is_nil
     return false if other.is_nil or self.is_nil
@@ -611,6 +613,38 @@ class ListGlispObject < GlispObject
     gl_list2(:evalresult, self)
   end
 
+  def eval_quote(env, stack, step, level, quote_depth)
+    sym = car_symbol
+    value = cadr_or(nil)
+    if sym == :quote then
+      # eval から呼び出された最初は必ずこの分岐に入る
+      if value == nil then
+        return [gl_nil, step - 1, true]
+      end
+      value, step, completed = value.eval_quote(env, stack, step, level, quote_depth + 1)
+      return [gl_list2(:quote, value), step, true] if quote_depth > 0 and completed
+      return [gl_list2(:quote, value), step, false] if step == 0 or not completed
+      return [gl_list2(:evalresult, value), step - 1, true]
+    elsif sym == :unquote then
+      if value == nil then
+        return [gl_nil, step - 1, true]
+      end
+      if quote_depth == 1 then
+        value, step = value.eval(env, stack, step, level)
+        return [gl_list2(:unquote, value), step, false] if step == 0 or not value.is_permanent
+        return [value.decode, step - 1, true]
+      else
+        value, step, completed = value.eval_quote(env, stack, step, level, quote_depth - 1)
+        return [gl_list2(:unquote, value), step, completed]
+      end
+    else
+      new_car, step, completed1 = car.eval_quote(env, stack, step, level, quote_depth)
+      return [gl_cons(new_car, cdr), step, false] if step == 0
+      new_cdr, step, completed2 = cdr.eval_quote(env, stack, step, level, quote_depth)
+      return [gl_cons(new_car, new_cdr), step, completed1 && completed2]
+    end
+  end
+
 #  def body_to_simple
 #    if cdr.length == 0 then
 #      car
@@ -685,6 +719,10 @@ class NilGlispObject < ListGlispObject
     [self, step]
   end
 
+  def eval_quote(env, stack, step, level, quote_depth)
+    [self, step, true]
+  end
+
   def eval_func_call(env, stack, step, level, args)
     [self, step]
   end
@@ -703,43 +741,6 @@ end # NilGlispObject
 #class BasicConsGlispObject < ListGlispObject
 #
 #  def initialize
-#  end
-#
-#  def eval_quote(env, stack, step, level, quote_depth)
-#    sym = car_to_sym
-#    value = cdr.car_or(nil)
-#    if sym == :quote then
-#      # eval から呼び出された最初は必ずこの分岐に入る
-#      if value == nil then
-#        return [gl_list(:throw,
-#                        '\'Quote\' needs an argument.',
-#                        :Exception), step - 1, true]
-#      end
-#      value, step, completed = value.eval_quote(env, stack, step, level, quote_depth + 1)
-#      return [gl_list2(:quote, value), step, false] if step == 0 or not completed
-#      return [value, step - 1, true] if quote_depth == 0
-#      return [gl_list2(:quote, value), step, true]
-#    elsif sym == :unquote then
-#      if value == nil then
-#        return [gl_list(:throw,
-#                        '\'Unquote\' needs an argument.',
-#                        :Exception), step - 1, true]
-#      end
-#      if quote_depth == 1 then
-#        prev_step = step
-#        value, step, completed = value.eval(env, stack, step, level)
-#        return [gl_list2(:unquote, value), step, false] if step == 0 or not completed
-#        return [value, step - 1, true]
-#      else
-#        value, step, completed = value.eval_quote(env, stack, step, level, quote_depth - 1)
-#        return [gl_list2(:unquote, value), step, completed]
-#      end
-#    else
-#      new_car, step, completed1 = car.eval_quote(env, stack, step, level, quote_depth)
-#      return [gl_cons(new_car, cdr), step, false] if step == 0
-#      new_cdr, step, completed2 = cdr.eval_quote(env, stack, step, level, quote_depth)
-#      return [gl_cons(new_car, new_cdr), step, completed1 && completed2]
-#    end
 #  end
 #
 #end # BasicConsGlispObject
@@ -821,10 +822,11 @@ class ConsGlispObject < ListGlispObject
 #    if sym == :cons then
 #      return _eval_cons(env, stack, step, level)
 #    end
-#
-#    if sym == :quote then
-#      return eval_quote(env, stack, step, level, 0)
-#    end
+
+    if sym == :quote then
+      result, step, = eval_quote(env, stack, step, level, 0)
+      return [result, step]
+    end
 
 #    if sym == :unquote then
 #      return [gl_list(:throw,
@@ -1413,7 +1415,7 @@ def do_test
                '( quote ( a b c ( unquote ( Proc* 2 3 ) ) ) )',
                '( quote ( a b c ( unquote 5 ) ) )',
                '( quote ( a b c 5 ) )',
-               '( a b c 5 )',
+               '( evalresult ( a b c 5 ) )',
               ])
 
   do_test_sub(env, "`(a `(b ,,(+ 2 3)))",
@@ -1422,7 +1424,7 @@ def do_test
                '( quote ( a ( quote ( b ( unquote ( unquote ( Proc* 2 3 ) ) ) ) ) ) )',
                '( quote ( a ( quote ( b ( unquote ( unquote 5 ) ) ) ) ) )',
                '( quote ( a ( quote ( b ( unquote 5 ) ) ) ) )',
-               '( a ( quote ( b ( unquote 5 ) ) ) )',
+               '( evalresult ( a ( quote ( b ( unquote 5 ) ) ) ) )',
               ])
 
   do_test_sub(env, "(stack-push (a 1) (* (+ a 2) (+ a 3)))",
