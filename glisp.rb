@@ -1430,11 +1430,11 @@ def do_test
                '( eval-result ( ( 2 3 4 ) 5 6 7 ) )',
               ])
 
-  do_test_sub(env, "(cons (eval-result (2 3 4)) 5)",
-              [
-               '( cons ( eval-result ( 2 3 4 ) ) 5 )',
-               '( throw "\'Cons\' second argument must be a list." Exception )',
-              ])
+#  do_test_sub(env, "(cons (eval-result (2 3 4)) 5)",
+#              [
+#               '( cons ( eval-result ( 2 3 4 ) ) 5 )',
+#               '( throw "\'Cons\' second argument must be a list." Exception )',
+#              ])
 
   do_test_sub(env, "(+ 2 3)",
               [
@@ -1461,117 +1461,117 @@ def do_test
                '( eval-result ( a ( quote ( b ( unquote 5 ) ) ) ) )',
               ])
 
-  do_test_sub(env, "(stack-push (a 1) (* (+ a 2) (+ a 3)))",
-              [
-               '( stack-push ( a 1 ) ( * ( + a 2 ) ( + a 3 ) ) )',
-               '( stack-push ( a 1 ) ( Proc* ( + a 2 ) ( + a 3 ) ) )',
-               '( stack-push ( a 1 ) ( Proc* ( Proc* a 2 ) ( + a 3 ) ) )',
-               '( stack-push ( a 1 ) ( Proc* ( Proc* 1 2 ) ( + a 3 ) ) )',
-               '( stack-push ( a 1 ) ( Proc* 3 ( + a 3 ) ) )',
-               '( stack-push ( a 1 ) ( Proc* 3 ( Proc* a 3 ) ) )',
-               '( stack-push ( a 1 ) ( Proc* 3 ( Proc* 1 3 ) ) )',
-               '( stack-push ( a 1 ) ( Proc* 3 4 ) )',
-               '( stack-push ( a 1 ) 12 )',
-               '12',
-              ])
-
-  do_test_sub(env, "(stack-push (a (+ 3 4)) (+ a 2))",
-              [
-               '( stack-push ( a ( + 3 4 ) ) ( + a 2 ) )',
-               '( stack-push ( a ( + 3 4 ) ) ( Proc* a 2 ) )',
-               '( stack-push ( a ( + 3 4 ) ) ( Proc* ( stack-get 0 ) 2 ) )',
-               '( stack-push ( a ( Proc* 3 4 ) ) ( Proc* ( stack-get 0 ) 2 ) )',
-               '( stack-push ( a 7 ) ( Proc* ( stack-get 0 ) 2 ) )',
-               '( stack-push ( a 7 ) ( Proc* 7 2 ) )',
-               '( stack-push ( a 7 ) 9 )',
-               '9',
-              ])
-
-  do_test_sub(env, "(if false (/ 1 0) (car (3 1)))",
-              [
-               '( if false ( / 1 0 ) ( car ( 3 1 ) ) )',
-               '( car ( 3 1 ) )',
-               '3',
-              ])
-
-  do_test_sub(env, "(stack-push (c 1) (func (a b) (+ (* a b) c)))",
-              [
-               '( stack-push ( c 1 ) ( func ( a b ) ( + ( * a b ) c ) ) )',
-               '( stack-push ( c 1 ) ( func ( a b ) ( Proc* ( * a b ) c ) ) )',
-               '( stack-push ( c 1 ) ( func ( a b ) ( Proc* ( Proc* a b ) c ) ) )',
-               '( stack-push ( c 1 ) ( func ( a b ) ( Proc* ( Proc* ( stack-get 0 ) b ) c ) ) )',
-               '( stack-push ( c 1 ) ( func ( a b ) ( Proc* ( Proc* ( stack-get 0 ) ( stack-get 1 ) ) c ) ) )',
-               '( stack-push ( c 1 ) ( func ( a b ) ( Proc* ( Proc* ( stack-get 0 ) ( stack-get 1 ) ) 1 ) ) )',
-               '( func ( a b ) ( Proc* ( Proc* ( stack-get 0 ) ( stack-get 1 ) ) 1 ) )',
-              ])
-
-  do_test_sub(env, '((func (a b) (* a b)) 3 4)',
-              [
-               '( ( func ( a b ) ( * a b ) ) 3 4 )',
-               '( ( func ( a b ) ( Proc* a b ) ) 3 4 )',
-               '( ( func ( a b ) ( Proc* ( stack-get 0 ) b ) ) 3 4 )',
-               '( ( func ( a b ) ( Proc* ( stack-get 0 ) ( stack-get 1 ) ) ) 3 4 )',
-               '( stack-push ( b 4 ) ( stack-push ( a 3 ) ( Proc* ( stack-get 0 ) ( stack-get 1 ) ) ) )',
-               '( stack-push ( b 4 ) ( stack-push ( a 3 ) ( Proc* 3 ( stack-get 1 ) ) ) )',
-               '( stack-push ( b 4 ) ( stack-push ( a 3 ) ( Proc* 3 4 ) ) )',
-               '( stack-push ( b 4 ) ( stack-push ( a 3 ) 12 ) )',
-               '( stack-push ( b 4 ) 12 )',
-               '12',
-              ])
-
-  do_test_sub(env, "((func (f) (func (x) (+ x 1))) 3)",
-              [
-               '( ( func ( f ) ( func ( x ) ( + x 1 ) ) ) 3 )',
-               '( ( func ( f ) ( func ( x ) ( Proc* x 1 ) ) ) 3 )',
-               '( ( func ( f ) ( func ( x ) ( Proc* ( stack-get 0 ) 1 ) ) ) 3 )',
-               '( stack-push ( f 3 ) ( func ( x ) ( Proc* ( stack-get 0 ) 1 ) ) )',
-               '( func ( x ) ( Proc* ( stack-get 0 ) 1 ) )',
-              ])
-
-  do_test_sub(env, "((func (f) (func (x) (f (f x)))) (func (x) (+ x (+ 2 3))))",
-              [
-               '( ( func ( f ) ( func ( x ) ( f ( f x ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
-               '( ( func ( f ) ( func ( x ) ( ( stack-get 1 ) ( f x ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
-               '( ( func ( f ) ( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) x ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
-               '( ( func ( f ) ( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
-               '( stack-push ' +
-                 '( f ( func ( x ) ( + x ( + 2 3 ) ) ) ) ' +
-                 '( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
-               ')',
-               '( stack-push ' +
-                 '( f ( func ( x ) ( Proc* x ( + 2 3 ) ) ) ) ' +
-                 '( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
-               ')',
-               '( stack-push ' +
-                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) ( + 2 3 ) ) ) ) ' +
-                 '( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
-               ')',
-               '( stack-push ' +
-                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) ( Proc* 2 3 ) ) ) ) ' +
-                 '( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
-               ')',
-               '( stack-push ' +
-                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
-                 '( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
-               ')',
-               '( stack-push ' +
-                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
-                 '( func ( x ) ( ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
-               ')',
-               '( stack-push ' +
-                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
-                 '( func ( x ) ( stack-push ( x ( ( stack-get 1 ) ( stack-get 0 ) ) ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
-               ')',
-               '( stack-push ' +
-                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
-                 '( func ( x ) ( stack-push ( x ( ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ( stack-get 0 ) ) ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
-               ')',
-               '( stack-push ' +
-                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
-                 '( func ( x ) ( stack-push ( x ( stack-push ( x ( stack-get 0 ) ) ( Proc* ( stack-get 0 ) 5 ) ) ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
-               ')',
-               '( func ( x ) ( stack-push ( x ( stack-push ( x ( stack-get 0 ) ) ( Proc* ( stack-get 0 ) 5 ) ) ) ( Proc* ( stack-get 0 ) 5 ) ) )',
-              ])
+#  do_test_sub(env, "(stack-push (a 1) (* (+ a 2) (+ a 3)))",
+#              [
+#               '( stack-push ( a 1 ) ( * ( + a 2 ) ( + a 3 ) ) )',
+#               '( stack-push ( a 1 ) ( Proc* ( + a 2 ) ( + a 3 ) ) )',
+#               '( stack-push ( a 1 ) ( Proc* ( Proc* a 2 ) ( + a 3 ) ) )',
+#               '( stack-push ( a 1 ) ( Proc* ( Proc* 1 2 ) ( + a 3 ) ) )',
+#               '( stack-push ( a 1 ) ( Proc* 3 ( + a 3 ) ) )',
+#               '( stack-push ( a 1 ) ( Proc* 3 ( Proc* a 3 ) ) )',
+#               '( stack-push ( a 1 ) ( Proc* 3 ( Proc* 1 3 ) ) )',
+#               '( stack-push ( a 1 ) ( Proc* 3 4 ) )',
+#               '( stack-push ( a 1 ) 12 )',
+#               '12',
+#              ])
+#
+#  do_test_sub(env, "(stack-push (a (+ 3 4)) (+ a 2))",
+#              [
+#               '( stack-push ( a ( + 3 4 ) ) ( + a 2 ) )',
+#               '( stack-push ( a ( + 3 4 ) ) ( Proc* a 2 ) )',
+#               '( stack-push ( a ( + 3 4 ) ) ( Proc* ( stack-get 0 ) 2 ) )',
+#               '( stack-push ( a ( Proc* 3 4 ) ) ( Proc* ( stack-get 0 ) 2 ) )',
+#               '( stack-push ( a 7 ) ( Proc* ( stack-get 0 ) 2 ) )',
+#               '( stack-push ( a 7 ) ( Proc* 7 2 ) )',
+#               '( stack-push ( a 7 ) 9 )',
+#               '9',
+#              ])
+#
+#  do_test_sub(env, "(if false (/ 1 0) (car (3 1)))",
+#              [
+#               '( if false ( / 1 0 ) ( car ( 3 1 ) ) )',
+#               '( car ( 3 1 ) )',
+#               '3',
+#              ])
+#
+#  do_test_sub(env, "(stack-push (c 1) (func (a b) (+ (* a b) c)))",
+#              [
+#               '( stack-push ( c 1 ) ( func ( a b ) ( + ( * a b ) c ) ) )',
+#               '( stack-push ( c 1 ) ( func ( a b ) ( Proc* ( * a b ) c ) ) )',
+#               '( stack-push ( c 1 ) ( func ( a b ) ( Proc* ( Proc* a b ) c ) ) )',
+#               '( stack-push ( c 1 ) ( func ( a b ) ( Proc* ( Proc* ( stack-get 0 ) b ) c ) ) )',
+#               '( stack-push ( c 1 ) ( func ( a b ) ( Proc* ( Proc* ( stack-get 0 ) ( stack-get 1 ) ) c ) ) )',
+#               '( stack-push ( c 1 ) ( func ( a b ) ( Proc* ( Proc* ( stack-get 0 ) ( stack-get 1 ) ) 1 ) ) )',
+#               '( func ( a b ) ( Proc* ( Proc* ( stack-get 0 ) ( stack-get 1 ) ) 1 ) )',
+#              ])
+#
+#  do_test_sub(env, '((func (a b) (* a b)) 3 4)',
+#              [
+#               '( ( func ( a b ) ( * a b ) ) 3 4 )',
+#               '( ( func ( a b ) ( Proc* a b ) ) 3 4 )',
+#               '( ( func ( a b ) ( Proc* ( stack-get 0 ) b ) ) 3 4 )',
+#               '( ( func ( a b ) ( Proc* ( stack-get 0 ) ( stack-get 1 ) ) ) 3 4 )',
+#               '( stack-push ( b 4 ) ( stack-push ( a 3 ) ( Proc* ( stack-get 0 ) ( stack-get 1 ) ) ) )',
+#               '( stack-push ( b 4 ) ( stack-push ( a 3 ) ( Proc* 3 ( stack-get 1 ) ) ) )',
+#               '( stack-push ( b 4 ) ( stack-push ( a 3 ) ( Proc* 3 4 ) ) )',
+#               '( stack-push ( b 4 ) ( stack-push ( a 3 ) 12 ) )',
+#               '( stack-push ( b 4 ) 12 )',
+#               '12',
+#              ])
+#
+#  do_test_sub(env, "((func (f) (func (x) (+ x 1))) 3)",
+#              [
+#               '( ( func ( f ) ( func ( x ) ( + x 1 ) ) ) 3 )',
+#               '( ( func ( f ) ( func ( x ) ( Proc* x 1 ) ) ) 3 )',
+#               '( ( func ( f ) ( func ( x ) ( Proc* ( stack-get 0 ) 1 ) ) ) 3 )',
+#               '( stack-push ( f 3 ) ( func ( x ) ( Proc* ( stack-get 0 ) 1 ) ) )',
+#               '( func ( x ) ( Proc* ( stack-get 0 ) 1 ) )',
+#              ])
+#
+#  do_test_sub(env, "((func (f) (func (x) (f (f x)))) (func (x) (+ x (+ 2 3))))",
+#              [
+#               '( ( func ( f ) ( func ( x ) ( f ( f x ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
+#               '( ( func ( f ) ( func ( x ) ( ( stack-get 1 ) ( f x ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
+#               '( ( func ( f ) ( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) x ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
+#               '( ( func ( f ) ( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ) ( func ( x ) ( + x ( + 2 3 ) ) ) )',
+#               '( stack-push ' +
+#                 '( f ( func ( x ) ( + x ( + 2 3 ) ) ) ) ' +
+#                 '( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
+#               ')',
+#               '( stack-push ' +
+#                 '( f ( func ( x ) ( Proc* x ( + 2 3 ) ) ) ) ' +
+#                 '( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
+#               ')',
+#               '( stack-push ' +
+#                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) ( + 2 3 ) ) ) ) ' +
+#                 '( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
+#               ')',
+#               '( stack-push ' +
+#                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) ( Proc* 2 3 ) ) ) ) ' +
+#                 '( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
+#               ')',
+#               '( stack-push ' +
+#                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
+#                 '( func ( x ) ( ( stack-get 1 ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
+#               ')',
+#               '( stack-push ' +
+#                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
+#                 '( func ( x ) ( ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ( ( stack-get 1 ) ( stack-get 0 ) ) ) ) ' +
+#               ')',
+#               '( stack-push ' +
+#                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
+#                 '( func ( x ) ( stack-push ( x ( ( stack-get 1 ) ( stack-get 0 ) ) ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
+#               ')',
+#               '( stack-push ' +
+#                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
+#                 '( func ( x ) ( stack-push ( x ( ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ( stack-get 0 ) ) ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
+#               ')',
+#               '( stack-push ' +
+#                 '( f ( func ( x ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
+#                 '( func ( x ) ( stack-push ( x ( stack-push ( x ( stack-get 0 ) ) ( Proc* ( stack-get 0 ) 5 ) ) ) ( Proc* ( stack-get 0 ) 5 ) ) ) ' +
+#               ')',
+#               '( func ( x ) ( stack-push ( x ( stack-push ( x ( stack-get 0 ) ) ( Proc* ( stack-get 0 ) 5 ) ) ) ( Proc* ( stack-get 0 ) 5 ) ) )',
+#              ])
 
 end
 
