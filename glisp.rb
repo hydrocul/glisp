@@ -69,13 +69,10 @@ end
 #   IntegerGlispObject
 #   BooleanGlispObject
 #   ProcGlispObject
-#   LazyEvalGlispObject
 #   ListGlispObject
 #     NilGlispObject
 #     ConsGlispObject
 #     StackPushGlispObject
-#     StackGetGlispObject
-#     GlobalGetGlispObject
 
 class GlispObject
 
@@ -83,6 +80,10 @@ class GlispObject
     raise RuntimeError
     # 各サブクラスで再実装している
     # ただし、ListGlispObject のサブクラスでは再実装していない
+  end
+
+  def eq?(other)
+    self == other
   end
 
   def to_rubyObj
@@ -156,10 +157,6 @@ class GlispObject
     false
   end
 
-  def is_lazy
-    false
-  end
-
   def length
     raise RuntimeError
     # ListGlispObject, NilGlispObject で再実装している
@@ -197,6 +194,10 @@ class GlispObject
     car_or(gl_nil).car_or(default)
   end
 
+  def cadar
+    car.cdr.car
+  end
+
   def cadar_or(default)
     car_or(gl_nil).cdr_or(gl_nil).car_or(default)
   end
@@ -231,8 +232,8 @@ class GlispObject
     # ListGlispObject, NilGlispObject で再実装している
   end
 
-  # ((1 a) (2 b) (3 c)) のような形式でマップを表現されたときの
-  # キーから値を取得する。各ペアの1つ目が値、2つ目がキー。
+  # ((a 1) (b 2) (c 3)) のような形式でマップを表現されたときの
+  # キーから値を取得する。各ペアの1つ目がキー、2つ目が値。
   # [インデックス, 取得した値] を返す。
   # 存在しない場合は [false, nil] を返す
   def get_by_key(key)
@@ -264,6 +265,15 @@ class GlispObject
   end
 
   # 返り値は [結果, step]。
+  def eval_tree(env, step)
+    stack = gl_nil
+    level = EVAL_FINAL
+    result, step = eval_symbol(env, stack, step, level)
+    return [result, step] if step == 0
+    return eval(env, stack, step, level)
+  end
+
+  # 返り値は [結果, step]。
   def eval(env, stack, step, level)
     [self, step]
     # SymbolGlispObject, ListGlispObject のサブクラスで再実装している
@@ -281,12 +291,25 @@ class GlispObject
     # ProcGlispObject, NilGlispObject, ConsGlispObject で再実装している
   end
 
+  def eval_symbol(env, stack, step, level)
+    [self, step]
+    # SymbolGlispObject, ListGlispObject のサブクラスで再実装している
+  end
+
   # 以下はlistについてのメソッド
 
   def eval_each(env, stack, step, level)
     new_car, step = car.eval(env, stack, step, level)
     return [gl_cons(new_car, cdr), step] if step == 0
     new_cdr, step = cdr.eval_each(env, stack, step, level)
+    [gl_cons(new_car, new_cdr), step]
+    # NilGlispObject で再実装している
+  end
+
+  def eval_symbol_each(env, stack, step, level)
+    new_car, step = car.eval_symbol(env, stack, step, level)
+    return [gl_cons(new_car, cdr), step] if step == 0
+    new_cdr, step = cdr.eval_symbol_each(env, stack, step, level)
     [gl_cons(new_car, new_cdr), step]
     # NilGlispObject で再実装している
   end
@@ -340,28 +363,26 @@ class SymbolGlispObject < GlispObject
   def eval(env, stack, step, level)
     index, value = stack.get_by_key(self)
     if index then
-      step = step - 1
-      if value.is_lazy then
-        # 参照先が lazy だった場合は評価をする
-        return [StackGetGlispObject.new(index), step] if step == 0
-        value, step = value.eval_lazy(env, stack, step, level)
-        return [StackGetGlispObject.new(index), step] if step == 0 or value.is_lazy
+      if value.is_undefined then
+        return [self, step]
+      else
         return [value, step - 1]
-      elsif value.is_undefined then
-        return [StackGetGlispObject.new(index), step]
-      else
-        return [value, step]
       end
     end
-    exists, value, is_val = env.global.get(symbol)
+    exists, value = env.global.get_initial_val(self)
     if exists then
-      if level != EVAL_FINAL and not is_val then
-        return [GlobalGetGlispObject.new(self), step - 1, false]
-      else
-        return [value, step - 1, true]
-      end
+      return value.eval(env, stack, step, level)
     end
-    return [self, step, false]
+    exists, value = env.global.get_global_val(self)
+    if exists then
+      return [value, step] if step == 0
+      return value.eval(env, stack, step - 1, level)
+    end
+    return [self, step]
+  end
+
+  def eval_symbol(env, stack, step, level)
+    return eval(env, stack, step, level)
   end
 
 end # SymbolGlispObject
@@ -459,11 +480,7 @@ class ProcGlispObject < GlispObject
   end
 
   def to_ss
-    if @name then
-      ['#<Proc:' + @name + '>']
-    else
-      [@proc.inspect]
-    end
+    @name
   end
 
   def proc
@@ -488,39 +505,6 @@ class ProcGlispObject < GlispObject
   end
 
 end # ProcGlispObject
-
-class LazyEvalGlispObject < GlispObject
-
-  def initialize(body, stack)
-    @body = body
-    @stack = stack
-  end
-
-#  def to_ss
-#    a = ['(', '#lazy', '(']
-#    a.push(* @body.to_ss)
-#    a.push(')', '(')
-#    a.push(* @stack.to_ss)
-#    a.push(')', ')')
-#    return a
-#  end
-
-  def is_lazy
-    true
-  end
-
-  def eval_lazy(env, stack, step, level)
-    new_body, step = @body.eval(env, @stack, step, level)
-    @body = new_body
-    return [self, step] if not new_body.is_permanent
-    [new_body, step]
-  end
-
-  def body
-    @body
-  end
-
-end # LazyEvalGlispObject
 
 class ListGlispObject < GlispObject
 
@@ -582,8 +566,8 @@ class ListGlispObject < GlispObject
   end
 
   def get_by_key(key)
-    if cadar_or(nil) == key then
-      return [0, caar]
+    if caar_or(nil) == key then
+      return [0, cadar]
     end
     index, value = cdr.get_by_key(key)
     if index then
@@ -724,6 +708,10 @@ class NilGlispObject < ListGlispObject
     [self, step]
   end
 
+  def eval_symbol(env, stack, step, level, args)
+    [self, step]
+  end
+
   def eval_quote(env, stack, step, level, quote_depth)
     [self, step, true]
   end
@@ -733,6 +721,10 @@ class NilGlispObject < ListGlispObject
   end
 
   def eval_each(env, stack, step, level)
+    [self, step]
+  end
+
+  def eval_symbol_each(env, stack, step, level)
     [self, step]
   end
 
@@ -775,39 +767,39 @@ class ConsGlispObject < ListGlispObject
     # 以下の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
     # 手動で生成した場合はここで処理する
 
-    if sym == :"stack-push" then
-      second = cadr_or(gl_nil)
-      name = second.car_or(nil)
-      value = second.cadr_or(nil)
-      body = caddr_or(gl_nil)
-      if name != nil and name.is_symbol and value != nil and body != nil then
-        return StackPushGlispObject.new(name.symbol, value, body).
-          eval(env, stack, step, level)
-      end
-      return [gl_list(:throw,
-                      'Illegal stack-push operator.',
-                      :Exception), step - 1]
-    end
+    # if sym == :"stack-push" then
+    #   second = cadr_or(gl_nil)
+    #   name = second.car_or(nil)
+    #   value = second.cadr_or(nil)
+    #   body = caddr_or(gl_nil)
+    #   if name != nil and name.is_symbol and value != nil and body != nil then
+    #     return StackPushGlispObject.new(name.symbol, value, body).
+    #       eval(env, stack, step, level)
+    #   end
+    #   return [gl_list(:throw,
+    #                   'Illegal stack-push operator.',
+    #                   :Exception), step - 1]
+    # end
 
-    if sym == :"stack-get" then
-      index = cardr_or(nil)
-      if integer != nil && index.is_integer then
-        return StackGetGlispObject.new(index.integer).eval(env, stack, step, level)
-      end
-      return [gl_list(:throw,
-                      'Stack index needs Integer, but: %s' % [index],
-                      :Exception), step - 1]
-    end
+    # if sym == :"stack-get" then
+    #   index = cardr_or(nil)
+    #   if integer != nil && index.is_integer then
+    #     return StackGetGlispObject.new(index.integer).eval(env, stack, step, level)
+    #   end
+    #   return [gl_list(:throw,
+    #                   'Stack index needs Integer, but: %s' % [index],
+    #                   :Exception), step - 1]
+    # end
 
-    if sym == :"global-get" then
-      name = carr_or(nil)
-      if name != nil && name.is_symbol then
-        return GlobalGetGlispObject.new(name).eval(env, stack, step, level)
-      end
-      return [gl_list(:throw,
-                      'Global variable name needs Symbol, but: %s' % [name],
-                      :Exception), step - 1]
-    end
+    # if sym == :"global-get" then
+    #   name = carr_or(nil)
+    #   if name != nil && name.is_symbol then
+    #     return GlobalGetGlispObject.new(name).eval(env, stack, step, level)
+    #   end
+    #   return [gl_list(:throw,
+    #                   'Global variable name needs Symbol, but: %s' % [name],
+    #                   :Exception), step - 1]
+    # end
 
     # 以上の各命令は StackPushGlispObject など専用オブジェクトが生成されるはずだが、
     # 手動で生成した場合はここで処理する
@@ -859,6 +851,10 @@ class ConsGlispObject < ListGlispObject
 
     return new_car.eval_func_call(env, stack, step, level, args)
 
+  end
+
+  def eval_symbol(env, stack, step, level)
+    eval_symbol_each(env, stack, step, level)
   end
 
   # carが :car の場合に eval から呼び出される
@@ -1097,115 +1093,88 @@ class ConsGlispObject < ListGlispObject
 
 end # ConsGlispObject
 
-class StackPushGlispObject < ListGlispObject
+#class StackPushGlispObject < ListGlispObject
+#
+#  @@symbolObj = SymbolGlispObject.new(:"stack-push")
+#
+#  # nameはRubyプリミティブのシンボル
+#  def initialize(name, value, body)
+#    @name = name
+#    @value = value
+#    @body = body
+#  end
+#
+#  def car
+#    @@symbolObj
+#  end
+#
+#  def cdr
+#    gl_list2(gl_list2(@name, @value), @body)
+#  end
+#
+#  def eval(env, stack, step, level)
+#    if @value.is_permanent then
+#      new_stack = gl_cons(gl_list2(@value, @name), stack)
+#      new_body, step = @body.eval(env, new_stack, step, level)
+#      return [StackPushGlispObject.new(@name, @value, new_body),
+#              step]  if step == 0 or not new_body.is_permanent
+#      return [new_body, step - 1]
+#    else
+#      lazy = LazyEvalGlispObject.new(@value, stack)
+#      new_stack = gl_cons(gl_list2(lazy, @name), stack)
+#      new_body, step = @body.eval(env, new_stack, step, level)
+#      new_value = lazy.body
+#      return [StackPushGlispObject.new(@name, new_value, new_body),
+#              step]  if step == 0 or not new_body.is_permanent
+#      [new_body, step - 1]
+#    end
+#  end
+#
+#end # StackPushGlispObject
 
-  @@symbolObj = SymbolGlispObject.new(:"stack-push")
-
-  # nameはRubyプリミティブのシンボル
-  def initialize(name, value, body)
-    @name = name
-    @value = value
-    @body = body
-  end
-
-  def car
-    @@symbolObj
-  end
-
-  def cdr
-    gl_list2(gl_list2(@name, @value), @body)
-  end
-
-  def eval(env, stack, step, level)
-    if @value.is_permanent then
-      new_stack = gl_cons(gl_list2(@value, @name), stack)
-      new_body, step = @body.eval(env, new_stack, step, level)
-      return [StackPushGlispObject.new(@name, @value, new_body),
-              step]  if step == 0 or not new_body.is_permanent
-      return [new_body, step - 1]
-    else
-      lazy = LazyEvalGlispObject.new(@value, stack)
-      new_stack = gl_cons(gl_list2(lazy, @name), stack)
-      new_body, step = @body.eval(env, new_stack, step, level)
-      new_value = lazy.body
-      return [StackPushGlispObject.new(@name, new_value, new_body),
-              step]  if step == 0 or not new_body.is_permanent
-      [new_body, step - 1]
-    end
-  end
-
-end # StackPushGlispObject
-
-class StackGetGlispObject < ListGlispObject
-
-  @@symbolObj = SymbolGlispObject.new(:"stack-get")
-
-  # indexはRubyプリミティブの整数
-  def initialize(index)
-    @index = index
-  end
-
-  def car
-    @@symbolObj
-  end
-
-  def cdr
-    gl_cons(@index, nil)
-  end
-
-  def eval(env, stack, step, level)
-
-    exists, value = stack.get_by_index(@index)
-
-    if not exists then
-      return [gl_list(:throw,
-                      'Stack index is out of bound: %d' % [@index],
-                      :Exception), step - 1]
-    end
-
-    value = value.car
-
-    if value.is_lazy then
-      # 参照先が lazy だった場合は評価をする
-      value, step = value.eval_lazy(env, stack, step, level)
-      return [self, step] if step == 0 or value.is_lazy
-      [value, step - 1]
-    elsif value.is_undefined then
-      [self, step]
-    else
-      [value, step - 1]
-    end
-
-  end
-
-end # StackGetGlispObject
-
-class GlobalGetGlispObject < ListGlispObject
-
-  @@symbolObj = SymbolGlispObject.new(:"global-get")
-
-  # nameはGlispObject
-  def initialize(name)
-    @name = name
-  end
-
-  def car
-    @@symbolObj
-  end
-
-  def cdr
-    gl_cons(@name, nil)
-  end
-
-  def eval(env, stack, step, level)
-
-    raise Exception, "TODO"
-
-    [self, step]
-
-  end
-
-end # GlobalGetGlispObject
+#class StackGetGlispObject < ListGlispObject
+#
+#  @@symbolObj = SymbolGlispObject.new(:"stack-get")
+#
+#  # indexはRubyプリミティブの整数
+#  def initialize(index)
+#    @index = index
+#  end
+#
+#  def car
+#    @@symbolObj
+#  end
+#
+#  def cdr
+#    gl_cons(@index, nil)
+#  end
+#
+#  def eval(env, stack, step, level)
+#
+#    exists, value = stack.get_by_index(@index)
+#
+#    if not exists then
+#      return [gl_list(:throw,
+#                      'Stack index is out of bound: %d' % [@index],
+#                      :Exception), step - 1]
+#    end
+#
+#    value = value.car
+#
+#    if value.is_lazy then
+#      # 参照先が lazy だった場合は評価をする
+#      value, step = value.eval_lazy(env, stack, step, level)
+#      return [self, step] if step == 0 or value.is_lazy
+#      [value, step - 1]
+#    elsif value.is_undefined then
+#      [self, step]
+#    else
+#      [value, step - 1]
+#    end
+#
+#  end
+#
+#end # StackGetGlispObject
 
 class InterpreterEnv
 
@@ -1222,8 +1191,8 @@ end # InterpreterEnv
 class Global
 
   def initialize
-    @vals = {}
-    @vars = {}
+    @initialStack = gl_nil
+    @globalStack = gl_nil
     _set_basic_object(:true, true)
     _set_basic_object(:false, false)
     _set_basic_operator(:+, true) do |*xs|
@@ -1243,39 +1212,57 @@ class Global
     end
   end
 
-  def get(symbol)
-    if symbol.is_a? GlispObject then
-      raise Excpetion, symbol.inspect
+  # 返り値は [存在するかどうか, 値]
+  def get_initial_val(symbol)
+    index, value = @initialStack.get_by_key(symbol)
+    if index then
+      return [true, value]
     end
-    if @vals.has_key?(symbol) then
-      [true, @vals[symbol], true]
-    elsif @vars.has_key?(symbol) then
-      [true, @vars[symbol], false]
-    else
-      [false, nil, false]
-    end
+    return [false, nil]
   end
 
-  def createVar(symbol)
-    if symbol.is_a? GlispObject then
-      raise Excpetion, symbol.inspect
+  # 返り値は [存在するかどうか, 値]
+  def get_global_val(symbol)
+    index, value = @globalStack.get_by_key(symbol)
+    if index then
+      return [true, value]
     end
-    @vars[symbol] = nil
+    return [false, nil]
   end
 
-  def set(symbol, value)
-    if symbol.is_a? GlispObject then
-      raise Excpetion, symbol.inspect
-    end
-    if @vars.has_key?(symbol) then
-      @vars[symbol] = value
-    else
-      @vals[symbol] = value
-    end
-  end
+#  def get(symbol)
+#    if symbol.is_a? GlispObject then
+#      raise Excpetion, symbol.inspect
+#    end
+#    if @initialStack.has_key?(symbol) then
+#      [true, @initialStack[symbol], true]
+#    elsif @vars.has_key?(symbol) then
+#      [true, @vars[symbol], false]
+#    else
+#      [false, nil, false]
+#    end
+#  end
+#
+#  def createVar(symbol)
+#    if symbol.is_a? GlispObject then
+#      raise Excpetion, symbol.inspect
+#    end
+#    @vars[symbol] = nil
+#  end
+#
+#  def set(symbol, value)
+#    if symbol.is_a? GlispObject then
+#      raise Excpetion, symbol.inspect
+#    end
+#    if @vars.has_key?(symbol) then
+#      @vars[symbol] = value
+#    else
+#      @initialStack[symbol] = value
+#    end
+#  end
 
   def _set_basic_object(symbol, obj)
-    @vals[symbol] = gl_create(obj)
+    @initialStack = gl_cons(gl_list2(symbol, obj), @initialStack)
   end
 
   def _set_basic_operator(symbol, can_calc_on_compile)
@@ -1284,7 +1271,7 @@ class Global
       ret = yield(*args)
       gl_create(ret)
     end
-    @vals[symbol] = ProcGlispObject.new(f, can_calc_on_compile, symbol.to_s)
+    _set_basic_object(symbol, ProcGlispObject.new(f, can_calc_on_compile, symbol.to_s))
   end
 
 end # Global
@@ -1436,17 +1423,16 @@ def do_test
 #               '( throw "\'Cons\' second argument must be a list." Exception )',
 #              ])
 
-  do_test_sub(env, "(+ 2 3)",
+  do_test_sub(env, "(+ 2 3 (* 4 5))",
               [
-               '( + 2 3 )',
-               '( Proc* 2 3 )',
-               '5',
+               '( + 2 3 ( * 4 5 ) )',
+               '( + 2 3 20 )',
+               '25',
               ])
 
   do_test_sub(env, "`(a b c ,(+ 2 3))",
               [
                '( quote ( a b c ( unquote ( + 2 3 ) ) ) )',
-               '( quote ( a b c ( unquote ( Proc* 2 3 ) ) ) )',
                '( quote ( a b c ( unquote 5 ) ) )',
                '( quote ( a b c 5 ) )',
                '( eval-result ( a b c 5 ) )',
@@ -1455,26 +1441,21 @@ def do_test
   do_test_sub(env, "`(a `(b ,,(+ 2 3)))",
               [
                '( quote ( a ( quote ( b ( unquote ( unquote ( + 2 3 ) ) ) ) ) ) )',
-               '( quote ( a ( quote ( b ( unquote ( unquote ( Proc* 2 3 ) ) ) ) ) ) )',
                '( quote ( a ( quote ( b ( unquote ( unquote 5 ) ) ) ) ) )',
                '( quote ( a ( quote ( b ( unquote 5 ) ) ) ) )',
                '( eval-result ( a ( quote ( b ( unquote 5 ) ) ) ) )',
               ])
 
-#  do_test_sub(env, "(stack-push (a 1) (* (+ a 2) (+ a 3)))",
-#              [
-#               '( stack-push ( a 1 ) ( * ( + a 2 ) ( + a 3 ) ) )',
-#               '( stack-push ( a 1 ) ( Proc* ( + a 2 ) ( + a 3 ) ) )',
-#               '( stack-push ( a 1 ) ( Proc* ( Proc* a 2 ) ( + a 3 ) ) )',
-#               '( stack-push ( a 1 ) ( Proc* ( Proc* 1 2 ) ( + a 3 ) ) )',
-#               '( stack-push ( a 1 ) ( Proc* 3 ( + a 3 ) ) )',
-#               '( stack-push ( a 1 ) ( Proc* 3 ( Proc* a 3 ) ) )',
-#               '( stack-push ( a 1 ) ( Proc* 3 ( Proc* 1 3 ) ) )',
-#               '( stack-push ( a 1 ) ( Proc* 3 4 ) )',
-#               '( stack-push ( a 1 ) 12 )',
-#               '12',
-#              ])
-#
+  do_test_sub(env, "(stack-push (a 1) (* (+ a 2) (+ a 3)))",
+              [
+               '( stack-push ( a 1 ) ( * ( + a 2 ) ( + a 3 ) ) )',
+               '( stack-push ( a 1 ) ( * ( + 1 2 ) ( + a 3 ) ) )',
+               '( * ( + 1 2 ) ( + 1 3 ) )',
+               '( * 3 ( + 1 3 ) )',
+               '( * 3 4 )',
+               '12',
+              ])
+
 #  do_test_sub(env, "(stack-push (a (+ 3 4)) (+ a 2))",
 #              [
 #               '( stack-push ( a ( + 3 4 ) ) ( + a 2 ) )',
@@ -1620,7 +1601,7 @@ def _test_eval_expr(expr, env, expected_patterns)
       break
     end
 
-    expr, step = expr.eval(env, gl_create([]), 1, EVAL_FINAL)
+    expr, step = expr.eval_tree(env, 1)
 
   end
   STDOUT.flush
@@ -1628,7 +1609,7 @@ end
 
 def _test_eval_expr2(expr, env, expected_patterns)
 
-  expr, step = expr.eval(env, gl_create([]), -1, EVAL_FINAL)
+  expr, step = expr.eval_tree(env, -1)
 
   expr_s = _test_convert_expr(expr)
   pattern = expected_patterns[-1]
