@@ -556,15 +556,56 @@ class ConsGlispObject < GlispObject
   end
 
   def eval(env, step, on_compile = false)
-    raise RuntimeError, "TODO"
+    result, env, step = _eval_sub(env, step, on_compile, false, false)
+    [result, step]
   end
 
   def eval_progn_def(env, step, on_compile = false)
-    raise RuntimeError, "TODO"
+    _eval_sub(env, step, on_compile, true, false)
   end
 
   def eval_progn_repl(env, step, on_compile = false)
-    raise RuntimeError, "TODO"
+    _eval_sub(env, step, on_compile, false, true)
+  end
+
+  # 返り値は [結果, env, step]。
+  def _eval_sub(env, step, on_compile, is_def, is_repl)
+
+    sym = car_symbol_or(nil)
+
+    if sym == :"def" then
+      if is_def || is_repl then
+        raise RuntimeError, "TODO"
+      else
+        return [gl_list(:throw,
+                        'Unexpected `def\' expression',
+                        :Exception), step - 1]
+      end
+    end
+
+    if is_def then
+      return [gl_list(:throw,
+                      'Expected `def\' expression',
+                      :Exception), step - 1]
+    end
+
+    if sym == :"eval-result" then
+      return [self, env, step]
+    end
+
+    func, step = car.eval(env, step, on_compile)
+    args = cdr
+    return [gl_cons(func, args), env, step] if step == 0
+    if not func.is_permanent then
+      if on_compile then
+        args, step = args.eval_each(env, step, on_compile)
+      end
+      return [gl_cons(func, args), env, step]
+    end
+
+    result, step = func.eval_func_call(env, step, args, on_compile)
+    return [result, env, step]
+
   end
 
   def eval_quote(env, step, quote_depth, on_compile = false)
