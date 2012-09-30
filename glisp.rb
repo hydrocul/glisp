@@ -270,7 +270,7 @@ class GlispObject
 
   def is_permanent_all
     return false if not car.is_permanent
-    cdr.is_permanent_all
+    return cdr.is_permanent_all
     # NilGlispObject で再実装している
   end
 
@@ -360,6 +360,144 @@ class NilGlispObject < GlispObject
   end
 
 end # NilGlispObject
+
+class ConsGlispObject < GlispObject
+
+  def initialize(car, cdr)
+    @car = gl_create(car)
+    @cdr = gl_create(cdr)
+    @result = nil
+    if not @cdr.is_list then
+      raise RuntimeError
+    end
+  end
+
+  def ==(other)
+    return false if not other.is_list
+    return false if other.is_nil
+    return false if other.car != self.car
+    return self.cdr == other.cdr
+  end
+
+  def to_rubyObj
+    array
+  end
+
+  # 文字列表現のもととなる文字列の配列を返す
+  def to_ss
+    a = ['(']
+    a.push(* self.to_ss_internal)
+    a.push(')')
+    return a
+  end
+
+  def to_ss_internal
+    a = []
+    a.push(* car.to_ss)
+    a.push(* cdr.to_ss_internal)
+    return a
+  end
+
+  def is_list
+    true
+  end
+
+  def is_nil
+    false
+  end
+
+  def array
+    list = self
+    args = []
+    while not list.is_nil
+      args.push list.car
+      list = list.cdr
+    end
+    args
+  end
+
+  def length
+    cdr.length + 1
+  end
+
+  def car
+    @car
+  end
+
+  def cdr
+    @cdr
+  end
+
+  def car_or(default)
+    @car
+  end
+
+  def cdr_or(default)
+    @cdr
+  end
+
+  def get_by_index(index)
+    if index == 0 then
+      [true, car]
+    elsif index < 0 then
+      [false, nil]
+    else
+      cdr.get_by_index(index - 1)
+    end
+  end
+
+  def get_by_key(key)
+    if car_car_or(nil) == key then
+      return [0, car.cdr.car]
+    end
+    index, value = cdr.get_by_key(key)
+    if index then
+      return [index + 1, value]
+    else
+      [false, nil]
+    end
+  end
+
+  def is_permanent
+    car_symbol_or == :"eval-result"
+  end
+
+  def decode
+    if car_symbol_or != :"eval-result" then
+      raise RuntimeError
+    end
+    cdr.car
+  end
+
+  def encode
+    gl_list2(:"eval-result", self)
+  end
+
+  def eval(env, step)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_progn_def(env, step)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_progn_last(env, step)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_progn_repl(env, step)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_quote(env, stack, step, quote_depth)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_func_call(env, stack, step, level, args)
+    raise RuntimeError, "TODO"
+  end
+
+end # ConsGlispObject
 
 class InterpreterEnv
 
@@ -505,6 +643,13 @@ def do_test
               '1',
               [
                '1',
+              ])
+
+  do_test_sub(env,
+              '(+ 1 2)',
+              [
+               '( + 1 2 )',
+               '3',
               ])
 
 end
