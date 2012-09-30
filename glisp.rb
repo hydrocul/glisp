@@ -233,32 +233,62 @@ class GlispObject
     # SymbolGlispObject, ConsGlispObject で再実装している
   end
 
-  # 返り値は [結果, step]。
-  def eval(env, step, on_compile = false)
+  # 返り値は [result, stack, step]。
+  def eval_repl(stack, step)
+    [self, stack, step]
+    # SymbolGlispObject, ConsGlispObject で再実装している
+  end
+
+  # 返り値は [result, step]。
+  # シンボルの解決は eval_symbol で行い、このメソッドではシンボルはそのままにする
+  def eval(step)
     [self, step]
     # SymbolGlispObject, ConsGlispObject で再実装している
   end
 
-  # 返り値は [結果, env, step]。
-  def eval_progn_def(env, step, on_compile = false)
-    [self, env, step]
-    # ConsGlispObject で再実装している
-  end
-
-  # 返り値は [結果, env, step]。
-  def eval_progn_repl(env, step, on_compile = false)
-    [self, env, step]
+  # 返り値は [result, step]。
+  def eval_fbody(step)
+    [self, step]
     # SymbolGlispObject, ConsGlispObject で再実装している
   end
 
-  # 返り値は [結果, step, 評価が完了しているかどうか]。
-  def eval_quote(env, step, quote_depth, on_compile = false)
+  # 返り値は [result, step]
+  # シンボルをすべて排除すると環境がなくても評価することができる
+  # 関数定義の中では関数の引数を参照している場合があるため、
+  # すべてのシンボルを排除することはできない
+  def eval_symbol(stack, step)
+    [self, step]
+    # SymbolGlispObject, ConsGlispObject で再実装している
+  end
+
+  # 返り値は [result, step, 評価が完了しているかどうか]。
+  def eval_quote(step, quote_depth)
     [self, step, true]
     # ConsGlispObject で再実装している
   end
 
-  # 返り値は [結果, step]。
-  def eval_func_call(env, step, args, on_compile = false)
+  # 返り値は [result, step, 評価が完了しているかどうか]。
+  # 関数定義の中に quote があった場合の関数定義の評価をする。
+  def eval_quote_fbody(step, quote_depth)
+    [self, step, true]
+    # ConsGlispObject で再実装している
+  end
+
+  # 返り値は [result, step]。
+  def eval_quote_symbol(stack, step, quote_depth)
+    [self, step]
+    # ConsGlispObject で再実装している
+  end
+
+  # 返り値は [result, step]。
+  def eval_fcall(step, args)
+    [self, step]
+    # ProcGlispObject, ConsGlispObject で再実装している
+  end
+
+  # 返り値は [result, step]。
+  # 関数定義の中に関数呼び出しがあった場合の関数定義の評価をする。
+  def eval_fcall_fbody(step, args)
     [self, step]
     # ProcGlispObject, ConsGlispObject で再実装している
   end
@@ -311,12 +341,23 @@ class SymbolGlispObject < GlispObject
     gl_list2(:"eval-result", self)
   end
 
-  def eval(env, step, on_compile = false)
+  # 返り値は [result, stack, step]。
+  def eval_repl(stack, step)
     raise RuntimeError, "TODO"
   end
 
-  # 返り値は [結果, env, step]。
-  def eval_progn_repl(env, step, on_compile = false)
+  # 返り値は [result, step]。
+  def eval(step)
+    raise RuntimeError, "TODO"
+  end
+
+  # 返り値は [result, step]。
+  def eval_fbody(step)
+    raise RuntimeError, "TODO"
+  end
+
+  # 返り値は [result, step]
+  def eval_symbol(stack, step)
     raise RuntimeError, "TODO"
   end
 
@@ -374,11 +415,20 @@ class ProcGlispObject < GlispObject
     [@name]
   end
 
-  # 返り値は [結果, step]。
-  def eval_func_call(env, step, args, on_compile = false)
+  def eval_fcall(step, args)
     args, step = args.eval_each(env, step, on_compile)
     return [gl_cons(self, args), step] if step == 0 or not args.is_permanent_all
-    return [gl_cons(self, args), step] if on_compile and not @can_calc_on_compile
+    _eval_fcall_sub(step, args)
+  end
+
+  def eval_fcall_fbody(step, args)
+    args, step = args.eval_each(env, step, on_compile)
+    return [gl_cons(self, args), step] if step == 0 or not args.is_permanent_all
+    return [gl_cons(self, args), step] if not @can_calc_on_compile
+    _eval_fcall_sub(step, args)
+  end
+
+  def _eval_fcall_sub(step, args)
     begin
       return [gl_create(@proc.call(* args.array)), step - 1]
     rescue => e
@@ -555,60 +605,107 @@ class ConsGlispObject < GlispObject
     gl_list2(:"eval-result", self)
   end
 
-  def eval(env, step, on_compile = false)
-    result, env, step = _eval_sub(env, step, on_compile, false, false)
-    [result, step]
-  end
-
-  def eval_progn_def(env, step, on_compile = false)
-    _eval_sub(env, step, on_compile, true, false)
-  end
-
-  def eval_progn_repl(env, step, on_compile = false)
-    _eval_sub(env, step, on_compile, false, true)
-  end
-
-  # 返り値は [結果, env, step]。
-  def _eval_sub(env, step, on_compile, is_def, is_repl)
+  def eval_repl(stack, step)
 
     sym = car_symbol_or(nil)
 
     if sym == :"def" then
-      if is_def || is_repl then
-        raise RuntimeError, "TODO"
-      else
-        return [gl_list(:throw,
-                        'Unexpected `def\' expression',
-                        :Exception), step - 1]
-      end
+      raise RuntimeError, "TODO"
     end
 
-    if is_def then
-      return [gl_list(:throw,
-                      'Expected `def\' expression',
-                      :Exception), step - 1]
-    end
+    result, step = eval_symbol(stack, step)
+    return [result, stack, step] if step == 0
 
-    if sym == :"eval-result" then
-      return [self, env, step]
-    end
-
-    func, step = car.eval(env, step, on_compile)
-    args = cdr
-    return [gl_cons(func, args), env, step] if step == 0
-    if not func.is_permanent then
-      if on_compile then
-        args, step = args.eval_each(env, step, on_compile)
-      end
-      return [gl_cons(func, args), env, step]
-    end
-
-    result, step = func.eval_func_call(env, step, args, on_compile)
-    return [result, env, step]
+    result, step = eval(step)
+    return [result, stack, step]
 
   end
 
+  def eval(step)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_fbody(step)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_symbol(stack, step)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_quote(step, quote_depth)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_quote_fbody(step, quote_depth)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_quote_symbol(stack, step, quote_depth)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_fcall(step, args)
+    raise RuntimeError, "TODO"
+  end
+
+  def eval_fcall_fbody(step, args)
+    raise RuntimeError, "TODO"
+  end
+
+
+#  # 返り値は [結果, env, step]。
+#  def _eval_sub(env, step, on_compile, is_def, is_repl, is_symbol)
+#
+#    sym = car_symbol_or(nil)
+#
+#    if sym == :"def" then
+#      if is_symbol then
+#        target = cdr.car
+#        new_target, step = target.eval_symbol(env, step)
+#        return [gl_list2(:def, new_target), env, step]
+#      elsif is_def || is_repl then
+#        raise RuntimeError, "TODO"
+#      else
+#        return [gl_list(:throw,
+#                        'Unexpected `def\' expression',
+#                        :Exception), step - 1]
+#      end
+#    end
+#
+#    if is_def then
+#      raise RuntimeError, "TODO"
+#      # return [gl_list(:throw,
+#      #                 'Expected `def\' expression',
+#      #                 :Exception), step - 1]
+#    end
+#
+#    if sym == :"eval-result" then
+#      return [self, env, step]
+#    end
+#
+#    func, step = car.eval(env, step, on_compile)
+#    args = cdr
+#    return [gl_cons(func, args), env, step] if step == 0
+#    if not func.is_permanent then
+#      if on_compile then
+#        args, step = args.eval_each(env, step, on_compile)
+#      end
+#      return [gl_cons(func, args), env, step]
+#    end
+#
+#    result, step = func.eval_func_call(env, step, args, on_compile)
+#    return [result, env, step]
+#
+#  end
+
+  # 返り値は [結果, step, 評価が完了しているかどうか]。
   def eval_quote(env, step, quote_depth, on_compile = false)
+    raise RuntimeError, "TODO"
+  end
+
+  # 返り値は [結果, step]。
+  def eval_quote_symbol(env, step, quote_depth)
     raise RuntimeError, "TODO"
   end
 
@@ -821,7 +918,7 @@ def test_eval_step(expr, env, expected_patterns)
       break
     end
 
-    expr, env, step = expr.eval_progn_repl(env, 1)
+    expr, env, step = expr.eval_repl(env, 1)
 
   end
 
@@ -831,7 +928,7 @@ end
 
 def test_eval_whole(expr, env, expected_patterns)
 
-  expr, env, step = expr.eval_progn_repl(env, -1)
+  expr, env, step = expr.eval_repl(env, -1)
 
   expr_s = expr_to_string(expr)
   pattern = expected_patterns[-1]
