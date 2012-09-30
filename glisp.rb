@@ -234,31 +234,31 @@ class GlispObject
   end
 
   # 返り値は [結果, step]。
-  def eval(env, step)
+  def eval(env, step, on_compile = false)
     [self, step]
     # SymbolGlispObject, ConsGlispObject で再実装している
   end
 
   # 返り値は [結果, env, step]。
-  def eval_progn_def(env, step)
+  def eval_progn_def(env, step, on_compile = false)
     [self, env, step]
     # ConsGlispObject で再実装している
   end
 
   # 返り値は [結果, env, step]。
-  def eval_progn_repl(env, step)
+  def eval_progn_repl(env, step, on_compile = false)
     [self, env, step]
     # SymbolGlispObject, ConsGlispObject で再実装している
   end
 
   # 返り値は [結果, step, 評価が完了しているかどうか]。
-  def eval_quote(env, stack, step, quote_depth)
+  def eval_quote(env, step, quote_depth, on_compile = false)
     [self, step, true]
     # ConsGlispObject で再実装している
   end
 
   # 返り値は [結果, step]。
-  def eval_func_call(env, stack, step, level, args)
+  def eval_func_call(env, step, args, on_compile = false)
     [self, step]
     # ProcGlispObject, ConsGlispObject で再実装している
   end
@@ -311,12 +311,12 @@ class SymbolGlispObject < GlispObject
     gl_list2(:"eval-result", self)
   end
 
-  def eval(env, step)
+  def eval(env, step, on_compile = false)
     raise RuntimeError, "TODO"
   end
 
   # 返り値は [結果, env, step]。
-  def eval_progn_repl(env, step)
+  def eval_progn_repl(env, step, on_compile = false)
     raise RuntimeError, "TODO"
   end
 
@@ -353,6 +353,42 @@ class IntegerGlispObject < GlispObject
   end
 
 end # IntegerGlispObject
+
+class ProcGlispObject < GlispObject
+
+  def initialize(proc, can_calc_on_compile, name)
+    @proc = proc
+    @can_calc_on_compile = can_calc_on_compile
+    @name = name
+  end
+
+  def ==(other)
+    other.is_a? ProcGlispObject and other.proc == proc
+  end
+
+  def to_rubyObj
+    @proc
+  end
+
+  def to_ss
+    [@name]
+  end
+
+  # 返り値は [結果, step]。
+  def eval_func_call(env, step, args, on_compile = false)
+    args, step = args.eval_each(env, step, on_compile)
+    return [gl_cons(self, args), step] if step == 0 or not args.is_permanent_all
+    return [gl_cons(self, args), step] if on_compile and not @can_calc_on_compile
+    begin
+      return [gl_create(@proc.call(* args.array)), step - 1]
+    rescue => e
+      return [gl_list(:throw,
+                      '[%s] %s' % [e.class, e.message],
+                      :Exception), step - 1]
+    end
+  end
+
+end # ProcGlispObject
 
 class NilGlispObject < GlispObject
 
@@ -519,23 +555,23 @@ class ConsGlispObject < GlispObject
     gl_list2(:"eval-result", self)
   end
 
-  def eval(env, step)
+  def eval(env, step, on_compile = false)
     raise RuntimeError, "TODO"
   end
 
-  def eval_progn_def(env, step)
+  def eval_progn_def(env, step, on_compile = false)
     raise RuntimeError, "TODO"
   end
 
-  def eval_progn_repl(env, step)
+  def eval_progn_repl(env, step, on_compile = false)
     raise RuntimeError, "TODO"
   end
 
-  def eval_quote(env, stack, step, quote_depth)
+  def eval_quote(env, step, quote_depth, on_compile = false)
     raise RuntimeError, "TODO"
   end
 
-  def eval_func_call(env, stack, step, level, args)
+  def eval_func_call(env, step, args, on_compile = false)
     raise RuntimeError, "TODO"
   end
 
