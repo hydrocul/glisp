@@ -3,6 +3,66 @@
 
 require 'stringio'
 
+def gl_create(rubyObj)
+  if rubyObj.is_a? GlispObject then
+    rubyObj
+  elsif rubyObj.is_a? Symbol then
+    SymbolGlispObject.new(rubyObj)
+  elsif rubyObj.is_a? String then
+    StringGlispObject.new(rubyObj)
+  elsif rubyObj.is_a? Integer then
+    IntegerGlispObject.new(rubyObj)
+  elsif rubyObj == false or rubyObj == true then
+    BooleanGlispObject.new(rubyObj)
+  elsif rubyObj.is_a? Proc then
+    ProcGlispObject.new(rubyObj, false, nil)
+  elsif rubyObj.is_a? Array then
+    _gl_createList(rubyObj, 0)
+  elsif rubyObj == nil then
+    gl_nil
+  else
+    raise RuntimeError, rubyObj.inspect
+  end
+end
+
+def _gl_createList(arrayRubyObj, offset)
+  if offset == arrayRubyObj.length then
+    gl_nil
+  else
+    gl_cons(arrayRubyObj[offset], _gl_createList(arrayRubyObj, offset + 1))
+  end
+end
+
+def gl_nil
+  NilGlispObject.instance
+end
+
+def gl_cons(car, cdr)
+  ConsGlispObject.new(car, cdr)
+end
+
+def gl_list(*x)
+  if x.empty? then
+    gl_nil
+  else
+    gl_cons(x[0], gl_list(*x[1..-1]))
+  end
+end
+
+def gl_list2(e1, e2)
+  gl_cons(e1, gl_cons(e2, nil))
+end
+
+# クラス階層図
+# GlispObject
+#   SymbolGlispObject
+#   StringGlispObject
+#   IntegerGlispObject
+#   BooleanGlispObject
+#   ProcGlispObject
+#   NilGlispObject
+#   ConsGlispObject
+
 class GlispObject
 
   def ==(other)
@@ -194,7 +254,6 @@ class GlispObject
     # SymbolGlispObject, ConsGlispObject のサブクラスで再実装している
   end
 
-
   # 返り値は [結果, step, 評価が完了しているかどうか]。
   def eval_quote(env, stack, step, quote_depth)
     [self, step, true]
@@ -217,6 +276,91 @@ class GlispObject
 
 end # GlispObject
 
+class IntegerGlispObject < GlispObject
+
+  def initialize(val)
+    @val = val
+  end
+
+  def ==(other)
+    other.is_a? IntegerGlispObject and other.val == val
+  end
+
+  def to_rubyObj
+    @val
+  end
+
+  def to_ss
+    [@val.inspect]
+  end
+
+  def is_integer
+    true
+  end
+
+  def integer
+    @val
+  end
+
+  def integer_or(default)
+    @val
+  end
+
+end # IntegerGlispObject
+
+class NilGlispObject < GlispObject
+
+  @@singleton = NilGlispObject.new
+
+  def self.instance
+    @@singleton
+  end
+
+  def ==(other)
+    return false if not other.is_list
+    return true if other.is_nil
+    return false
+  end
+
+  def to_rubyObj
+    []
+  end
+
+  def to_ss
+    ['(', ')']
+  end
+
+  def to_ss_internal
+    []
+  end
+
+  def to_boolean
+    false
+  end
+
+  def is_list
+    true
+  end
+
+  def is_nil
+    true
+  end
+
+  # Rubyの配列に変換する
+  def array
+    []
+  end
+
+  def length
+    0
+  end
+
+  def is_permanent_all
+    return true
+  end
+
+end # NilGlispObject
+
 class InterpreterEnv
 
   def initialize(primitives = false, globals = false)
@@ -236,14 +380,129 @@ class InterpreterEnv
     InterpreterEnv.new(@primitives, gl_cons(gl_list2(key, value), @globals))
   end
 
-end
+end # InterpreterEnv
 
+class Reader
+
+  def initialize(io)
+    @io = io
+    @next = []
+    @buf = []
+    @line = nil
+  end
+
+  def read
+    _read_expr
+  end
+
+  def _read_expr
+    t = _read_token
+    case t
+    when :'(' then
+      return _read_list
+    when :')' then
+      raise EvalException, 'unexpected: ' + t.to_s
+    when :'`' then
+      return gl_list2(:quote, _read_expr)
+    when :',' then
+      return gl_list2(:unquote, _read_expr)
+    when :'.' then
+      raise EvalException, 'unexpected: ' + t.to_s
+    else
+      return gl_create(t)
+    end
+  end
+
+  def _read_list
+    t = _read_token
+    case t
+    when :')' then
+      return nil
+    when EOF then
+      raise EvalException, 'unexpected: ' + t.to_s
+    else
+      _read_back(t)
+      head = _read_expr
+      tail = _read_list
+      return gl_cons(head, tail)
+    end
+  end
+
+  def _read_back(token)
+    @next.unshift(token)
+  end
+
+  def _read_token
+    if ! @next.empty? then
+      t = @next.shift
+      return t
+    end
+    _read_tokens
+    if @buf.empty? then
+      return EOF
+    end
+    t = @buf.shift
+    case t
+    when '(', ')', '`', ',', '.' then
+      token = t.to_sym
+    when 'nil' then
+      token = nil
+    when 'true' then
+      token = true
+    when 'false' then
+      token = false
+    when /\A\".*\"\z/ then
+      token = t[1..-2]
+    else
+      begin
+        token = Integer(t)
+      rescue ArgumentError
+        begin
+          token = Float(t)
+        rescue ArgumentError
+          token = t.to_sym
+        end
+      end
+    end
+  end
+
+  def _read_tokens
+    while @buf.empty? do
+      _read_line
+      if @line == nil then
+        return
+      end
+      token_pattern = /\s+|;.*$|(".*?"|[^()`,][^() ]*|[()`,])/
+      @line.chomp.scan(token_pattern) do |p|
+        @buf.push(p[0]) if p[0]
+      end
+    end
+  end
+
+  def _read_line
+    if @io == nil then
+      return
+    end
+    @line = @io.gets
+    if @line == nil then
+      @io.close
+      return
+    end
+  end
+
+end # Reader
 
 def do_test
   env = InterpreterEnv.new
 
+#  do_test_sub(env,
+#              '"abc"',
+#              [
+#               '"abc"',
+#              ])
+
   do_test_sub(env,
-              "1",
+              '1',
               [
                '1',
               ])
