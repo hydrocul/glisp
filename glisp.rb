@@ -3,6 +3,8 @@
 
 require 'stringio'
 
+EOF = :"$EOF"
+
 def gl_create(rubyObj)
   if rubyObj.is_a? GlispObject then
     rubyObj
@@ -60,6 +62,7 @@ end
 #   IntegerGlispObject
 #   BooleanGlispObject
 #   ProcGlispObject
+#   UndefinedGlispObject
 #   NilGlispObject
 #   ConsGlispObject
 
@@ -233,25 +236,19 @@ class GlispObject
   # 返り値は [結果, step]。
   def eval(env, step)
     [self, step]
-    # SymbolGlispObject, ConsGlispObject のサブクラスで再実装している
+    # SymbolGlispObject, ConsGlispObject で再実装している
   end
 
   # 返り値は [結果, env, step]。
   def eval_progn_def(env, step)
     [self, env, step]
-    # ConsGlispObject のサブクラスで再実装している
-  end
-
-  # 返り値は [結果, env, step]。
-  def eval_progn_last(env, step)
-    [self, env, step]
-    # SymbolGlispObject, ConsGlispObject のサブクラスで再実装している
+    # ConsGlispObject で再実装している
   end
 
   # 返り値は [結果, env, step]。
   def eval_progn_repl(env, step)
     [self, env, step]
-    # SymbolGlispObject, ConsGlispObject のサブクラスで再実装している
+    # SymbolGlispObject, ConsGlispObject で再実装している
   end
 
   # 返り値は [結果, step, 評価が完了しているかどうか]。
@@ -276,6 +273,55 @@ class GlispObject
 
 end # GlispObject
 
+class SymbolGlispObject < GlispObject
+
+  def initialize(val)
+    @val = val
+  end
+
+  def ==(other)
+    other.is_a? SymbolGlispObject and other.symbol == symbol
+  end
+
+  def to_rubyObj
+    @val
+  end
+
+  def to_ss
+    [@val.to_s]
+  end
+
+  def is_symbol
+    true
+  end
+
+  def symbol
+    @val
+  end
+
+  def symbol_or(default)
+    @val
+  end
+
+  def is_permanent
+    false
+  end
+
+  def encode
+    gl_list2(:"eval-result", self)
+  end
+
+  def eval(env, step)
+    raise RuntimeError, "TODO"
+  end
+
+  # 返り値は [結果, env, step]。
+  def eval_progn_repl(env, step)
+    raise RuntimeError, "TODO"
+  end
+
+end # SymbolGlispObject
+
 class IntegerGlispObject < GlispObject
 
   def initialize(val)
@@ -283,7 +329,7 @@ class IntegerGlispObject < GlispObject
   end
 
   def ==(other)
-    other.is_a? IntegerGlispObject and other.val == val
+    other.is_a? IntegerGlispObject and other.integer == integer
   end
 
   def to_rubyObj
@@ -459,7 +505,7 @@ class ConsGlispObject < GlispObject
   end
 
   def is_permanent
-    car_symbol_or == :"eval-result"
+    car_symbol_or(nil) == :"eval-result"
   end
 
   def decode
@@ -478,10 +524,6 @@ class ConsGlispObject < GlispObject
   end
 
   def eval_progn_def(env, step)
-    raise RuntimeError, "TODO"
-  end
-
-  def eval_progn_last(env, step)
     raise RuntimeError, "TODO"
   end
 
