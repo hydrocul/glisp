@@ -216,6 +216,10 @@ class GlispObject
     # ConsGlispObject で再実装している
   end
 
+  def push_pair(key, value)
+    gl_cons(gl_list2(key, value), self)
+  end
+
   def is_permanent
     true
     # SymbolGlispObject, ConsGlispObject で再実装している
@@ -247,13 +251,14 @@ class GlispObject
   end
 
   # 返り値は [result, step]。
+  # 関数定義の中を関数定義するために評価する。
   def eval_fbody(step)
     [self, step]
     # SymbolGlispObject, ConsGlispObject で再実装している
   end
 
   # 返り値は [result, step]
-  # シンボルをすべて排除すると環境がなくても評価することができる
+  # シンボルをすべて排除すると環境がなくても評価することができる。
   # 関数定義の中では関数の引数を参照している場合があるため、
   # すべてのシンボルを排除することはできない
   def eval_symbol(stack, step)
@@ -268,7 +273,7 @@ class GlispObject
   end
 
   # 返り値は [result, step, 評価が完了しているかどうか]。
-  # 関数定義の中に quote があった場合の関数定義の評価をする。
+  # 関数定義の中に quote があった場合の関数定義の評価をする
   def eval_quote_fbody(step, quote_depth)
     [self, step, true]
     # ConsGlispObject で再実装している
@@ -298,6 +303,22 @@ class GlispObject
   def is_permanent_all
     return false if not car.is_permanent
     return cdr.is_permanent_all
+    # NilGlispObject で再実装している
+  end
+
+  def eval_each(step)
+    new_car, step = car.eval(step)
+    return [gl_cons(new_car, cdr), step] if step == 0
+    new_cdr, step = cdr.eval_each(step)
+    return [gl_cons(new_car, new_cdr), step]
+    # NilGlispObject で再実装している
+  end
+
+  def eval_symbol_each(stack, step)
+    new_car, step = car.eval_symbol(stack, step)
+    return [gl_cons(new_car, cdr), step] if step == 0
+    new_cdr, step = cdr.eval_symbol_each(stack, step)
+    return [gl_cons(new_car, new_cdr), step]
     # NilGlispObject で再実装している
   end
 
@@ -358,7 +379,15 @@ class SymbolGlispObject < GlispObject
 
   # 返り値は [result, step]
   def eval_symbol(stack, step)
-    raise RuntimeError, "TODO"
+    index, value = stack.get_by_key(self)
+    if index then
+      if value.is_undefined then
+        return [self, step]
+      else
+        return [value, step - 1]
+      end
+    end
+    return [self, step]
   end
 
 end # SymbolGlispObject
@@ -404,7 +433,7 @@ class ProcGlispObject < GlispObject
   end
 
   def ==(other)
-    other.is_a? ProcGlispObject and other.proc == proc
+    other.is_a? ProcGlispObject and other.to_rubyObj == to_rubyObj
   end
 
   def to_rubyObj
@@ -412,17 +441,17 @@ class ProcGlispObject < GlispObject
   end
 
   def to_ss
-    [@name]
+    ['<' + @name + '>']
   end
 
   def eval_fcall(step, args)
-    args, step = args.eval_each(env, step, on_compile)
+    args, step = args.eval_each(step)
     return [gl_cons(self, args), step] if step == 0 or not args.is_permanent_all
     _eval_fcall_sub(step, args)
   end
 
   def eval_fcall_fbody(step, args)
-    args, step = args.eval_each(env, step, on_compile)
+    args, step = args.eval_fbody_each(step)
     return [gl_cons(self, args), step] if step == 0 or not args.is_permanent_all
     return [gl_cons(self, args), step] if not @can_calc_on_compile
     _eval_fcall_sub(step, args)
@@ -489,6 +518,14 @@ class NilGlispObject < GlispObject
 
   def is_permanent_all
     return true
+  end
+
+  def eval_each(step)
+    return [self, step]
+  end
+
+  def eval_symbol_each(stack, step)
+    return [self, step]
   end
 
 end # NilGlispObject
@@ -616,21 +653,62 @@ class ConsGlispObject < GlispObject
     result, step = eval_symbol(stack, step)
     return [result, stack, step] if step == 0
 
-    result, step = eval(step)
+    result, step = result.eval(step)
     return [result, stack, step]
 
   end
 
   def eval(step)
-    raise RuntimeError, "TODO"
+
+    sym = car_symbol_or(nil)
+
+    if sym == :"eval-result" then
+      return [self, step]
+    end
+
+    func, step = car.eval(step)
+    args = cdr
+    return [gl_cons(func, args), step] if step == 0
+    if not func.is_permanent then
+      return [gl_cons(func, args), step]
+    end
+
+    result, step = func.eval_fcall(step, args)
+    return [result, step]
+
   end
 
   def eval_fbody(step)
-    raise RuntimeError, "TODO"
+
+    sym = car_symbol_or(nil)
+
+    if sym == :"eval-result" then
+      return [self, step]
+    end
+
+    func, step = car.eval_fbody(step)
+    args = cdr
+    return [gl_cons(func, args), step] if step == 0
+    if not func.is_permanent then
+      args, step = args.eval_fbody_each(env, step)
+      return [gl_cons(func, args), step]
+    end
+
+    result, step = func.eval_fcall_fbody(step, args)
+    return [result, step]
+
   end
 
   def eval_symbol(stack, step)
-    raise RuntimeError, "TODO"
+
+    sym = car_symbol_or(nil)
+
+    if sym == :"eval-result" then
+      return [self, step]
+    end
+
+    return eval_symbol_each(stack, step)
+
   end
 
   def eval_quote(step, quote_depth)
@@ -646,10 +724,16 @@ class ConsGlispObject < GlispObject
   end
 
   def eval_fcall(step, args)
+    if not is_permanent then
+      raise RuntimeError
+    end
     raise RuntimeError, "TODO"
   end
 
   def eval_fcall_fbody(step, args)
+    if not is_permanent then
+      raise RuntimeError
+    end
     raise RuntimeError, "TODO"
   end
 
@@ -699,42 +783,34 @@ class ConsGlispObject < GlispObject
 #
 #  end
 
-  # 返り値は [結果, step, 評価が完了しているかどうか]。
-  def eval_quote(env, step, quote_depth, on_compile = false)
-    raise RuntimeError, "TODO"
-  end
-
-  # 返り値は [結果, step]。
-  def eval_quote_symbol(env, step, quote_depth)
-    raise RuntimeError, "TODO"
-  end
-
-  def eval_func_call(env, step, args, on_compile = false)
-    raise RuntimeError, "TODO"
-  end
-
 end # ConsGlispObject
 
-class InterpreterEnv
+def createDefaultStack
 
-  def initialize(primitives = false, globals = false)
-    if primitives == false then
-      @primitives = gl_nil
-    else
-      @primitives = primitives
-    end
-    if globals == false then
-      @globals = gl_nil
-    else
-      @globals = globals
-    end
+  stack = gl_nil
+
+#  stack = stack.push_pair(:true, true)
+#  stack = stack.push_pair(:false, false)
+
+  stack = push_basic_operator(stack, :+, true) do |*xs|
+    xs.inject(0) {|a, b| a + b}
+  end
+  stack = push_basic_operator(stack, :-, true) do |x, y|
+    x - y
   end
 
-  def push(key, value)
-    InterpreterEnv.new(@primitives, gl_cons(gl_list2(key, value), @globals))
-  end
+  return stack
 
-end # InterpreterEnv
+end
+
+def push_basic_operator(stack, symbol, can_calc_on_compile)
+  f = proc do |*xs|
+    args = xs.map {|x| x.to_rubyObj}
+    ret = yield(*args)
+    gl_create(ret)
+  end
+  stack.push_pair(symbol, ProcGlispObject.new(f, can_calc_on_compile, symbol.to_s))
+end
 
 class Reader
 
@@ -847,40 +923,41 @@ class Reader
 end # Reader
 
 def do_test
-  env = InterpreterEnv.new
+  stack = createDefaultStack
 
-#  do_test_sub(env,
+#  do_test_sub(stack,
 #              '"abc"',
 #              [
 #               '"abc"',
 #              ])
 
-  do_test_sub(env,
+  do_test_sub(stack,
               '1',
               [
                '1',
               ])
 
-  do_test_sub(env,
+  do_test_sub(stack,
               '(+ 1 2)',
               [
                '( + 1 2 )',
+               '( <+> 1 2 )',
                '3',
               ])
 
 end
 
-def do_test_sub(env, str, expected_patterns)
+def do_test_sub(stack, str, expected_patterns)
   io = StringIO.new(str)
   reader = Reader.new(io)
   expr = reader.read
-  env1 = test_eval_step(expr, env, expected_patterns)
-  env2 = test_eval_whole(expr, env, expected_patterns)
-  if env1 != env2 then
-    print "FAILED! env mismatch\n"
+  stack1 = test_eval_step(expr, stack, expected_patterns)
+  stack2 = test_eval_whole(expr, stack, expected_patterns)
+  if stack1 != stack2 then
+    print "FAILED! stack mismatch\n"
   end
   print "\n"
-  env2
+  stack2
 end
 
 def pattern_to_regex(pattern)
@@ -892,7 +969,7 @@ def expr_to_string(expr)
   expr.to_s
 end
 
-def test_eval_step(expr, env, expected_patterns)
+def test_eval_step(expr, stack, expected_patterns)
 
   offset = 0
   step = 0
@@ -918,32 +995,32 @@ def test_eval_step(expr, env, expected_patterns)
       break
     end
 
-    expr, env, step = expr.eval_repl(env, 1)
+    expr, stack, step = expr.eval_repl(stack, 1)
 
   end
 
-  env
+  stack
 
 end
 
-def test_eval_whole(expr, env, expected_patterns)
+def test_eval_whole(expr, stack, expected_patterns)
 
-  expr, env, step = expr.eval_repl(env, -1)
+  expr, stack, step = expr.eval_repl(stack, -1)
 
   expr_s = expr_to_string(expr)
   pattern = expected_patterns[-1]
   pattern_regexp = pattern_to_regex(pattern)
   if not pattern_regexp =~ expr_s then
     print "(total)\nFAILED! Expected: %s\n             but: %s\n" % [pattern, expr_s]
-    return env
+    return stack
   end
 
   if step != (- expected_patterns.length) then
     print "(total)\nFAILED! step = %d\n" % [step]
-    return env
+    return stack
   end
 
-  env
+  stack
 
 end
 
