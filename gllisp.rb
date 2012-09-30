@@ -1,6 +1,8 @@
 #!/usr/bin/ruby
 # -*- ruby-mode -*- -*- coding: utf-8 -*-
 
+require 'stringio'
+
 class GlispObject
 
   def ==(other)
@@ -217,9 +219,17 @@ end # GlispObject
 
 class InterpreterEnv
 
-  def initialize
-    @primitives = gl_nil
-    @globals = gl_nil
+  def initialize(primitives = false, globals = false)
+    if primitives == false then
+      @primitives = gl_nil
+    else
+      @primitives = primitives
+    end
+    if globals == false then
+      @globals = gl_nil
+    else
+      @globals = globals
+    end
   end
 
   def push(key, value)
@@ -228,7 +238,96 @@ class InterpreterEnv
 
 end
 
+
+def do_test
+  env = InterpreterEnv.new
+
+  do_test_sub(env,
+              "1",
+              [
+               '1',
+              ])
+
+end
+
+def do_test_sub(env, str, expected_patterns)
+  io = StringIO.new(str)
+  reader = Reader.new(io)
+  expr = reader.read
+  env1 = test_eval_step(expr, env, expected_patterns)
+  env2 = test_eval_whole(expr, env, expected_patterns)
+  if env1 != env2 then
+    print "FAILED! env mismatch\n"
+  end
+  print "\n"
+  env2
+end
+
+def pattern_to_regex(pattern)
+  Regexp.new('^' + pattern.gsub(/\+/, '\\\\+').gsub(/\*/, '\\\\*').
+             gsub(/\(/, '\(').gsub(/\)/, '\)') + '$')
+end
+
+def expr_to_string(expr)
+  expr.to_s
+end
+
+def test_eval_step(expr, env, expected_patterns)
+
+  offset = 0
+  step = 0
+  while true
+
+    expr_s = expr_to_string(expr)
+
+    print "%d expr:           %s\n" % [offset, expr_s]
+
+    if offset >= expected_patterns.length then
+      print "FAILED! Too much!\n"
+      break
+    end
+    pattern = expected_patterns[offset]
+    pattern_regexp = pattern_to_regex(pattern)
+    offset = offset + 1
+    if not pattern_regexp =~ expr_s then
+      print "FAILED! Expected: %s\n" % [pattern]
+      break
+    end
+
+    if expr.is_permanent then
+      break
+    end
+
+    expr, env, step = expr.eval_progn_repl(env, 1)
+
+  end
+
+  env
+
+end
+
+def test_eval_whole(expr, env, expected_patterns)
+
+  expr, env, step = expr.eval_progn_repl(env, -1)
+
+  expr_s = expr_to_string(expr)
+  pattern = expected_patterns[-1]
+  pattern_regexp = pattern_to_regex(pattern)
+  if not pattern_regexp =~ expr_s then
+    print "(total)\nFAILED! Expected: %s\n             but: %s\n" % [pattern, expr_s]
+    return env
+  end
+
+  if step != (- expected_patterns.length) then
+    print "(total)\nFAILED! step = %d\n" % [step]
+    return env
+  end
+
+  env
+
+end
+
 if __FILE__ == $PROGRAM_NAME then
-  puts "TEST"
+  do_test
 end
 
