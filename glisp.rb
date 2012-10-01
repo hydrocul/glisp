@@ -201,6 +201,10 @@ class GlispObject
     car_or(gl_nil).car_or(default)
   end
 
+  def cdr_car_or(default)
+    cdr_or(gl_nil).car_or(default)
+  end
+
   # [存在するかどうかの論理値, 取得した値] を返す
   def get_by_index(index)
     [false, nil]
@@ -364,17 +368,17 @@ class SymbolGlispObject < GlispObject
 
   # 返り値は [result, stack, step]。
   def eval_repl(stack, step)
-    raise RuntimeError, "TODO"
+    [gl_list2(:"eval-result", self), stack, step - 1]
   end
 
   # 返り値は [result, step]。
   def eval(step)
-    raise RuntimeError, "TODO"
+    [gl_list2(:"eval-result", self), step - 1]
   end
 
   # 返り値は [result, step]。
   def eval_fbody(step)
-    raise RuntimeError, "TODO"
+    [gl_list2(:"eval-result", self), step - 1]
   end
 
   # 返り値は [result, step]
@@ -478,6 +482,7 @@ class NilGlispObject < GlispObject
   end
 
   def ==(other)
+    return false if other == nil
     return false if not other.is_list
     return true if other.is_nil
     return false
@@ -542,6 +547,7 @@ class ConsGlispObject < GlispObject
   end
 
   def ==(other)
+    return false if other == nil
     return false if not other.is_list
     return false if other.is_nil
     return false if other.car != self.car
@@ -666,12 +672,19 @@ class ConsGlispObject < GlispObject
       return [self, step]
     end
 
+    if sym == :quote then
+      result, step, = eval_quote(step, 0)
+      return [result, step]
+    end
+
     func, step = car.eval(step)
     args = cdr
     return [gl_cons(func, args), step] if step == 0
     if not func.is_permanent then
       return [gl_cons(func, args), step]
     end
+
+    func = func.decode
 
     result, step = func.eval_fcall(step, args)
     return [result, step]
@@ -686,6 +699,11 @@ class ConsGlispObject < GlispObject
       return [self, step]
     end
 
+    if sym == :quote then
+      result, step, = eval_quote_fbody(step, 0)
+      return [result, step]
+    end
+
     func, step = car.eval_fbody(step)
     args = cdr
     return [gl_cons(func, args), step] if step == 0
@@ -693,6 +711,8 @@ class ConsGlispObject < GlispObject
       args, step = args.eval_fbody_each(env, step)
       return [gl_cons(func, args), step]
     end
+
+    func = func.decode
 
     result, step = func.eval_fcall_fbody(step, args)
     return [result, step]
@@ -707,12 +727,53 @@ class ConsGlispObject < GlispObject
       return [self, step]
     end
 
+    if sym == :quote then
+      return eval_quote_symbol(stack, step, 0)
+    end
+
     return eval_symbol_each(stack, step)
 
   end
 
   def eval_quote(step, quote_depth)
-    raise RuntimeError, "TODO"
+
+    sym = car_symbol_or(nil)
+    value = cdr_car_or(nil)
+
+    if sym == :quote then
+      # eval から呼び出された最初は必ずこの分岐に入る
+
+      if value == nil then
+        return [gl_nil, step - 1, true]
+      end
+      value, step, completed = value.eval_quote(step, quote_depth + 1)
+      return [gl_list2(:quote, value), step, true] if quote_depth > 0 and completed
+      return [gl_list2(:quote, value), step, false] if step == 0 or not completed
+      return [gl_list2(:"eval-result", value), step - 1, true]
+
+    elsif sym == :unquote then
+
+      if value == nil then
+        return [gl_nil, step - 1, true]
+      end
+      if quote_depth == 1 then
+        value, step = value.eval(step)
+        return [gl_list2(:unquote, value), step, false] if step == 0 or not value.is_permanent
+        return [value.decode, step - 1, true]
+      else
+        value, step, completed = value.eval_quote(step, quote_depth - 1)
+        return [gl_list2(:unquote, value), step, completed]
+      end
+
+    else
+
+      new_car, step, completed1 = car.eval_quote(step, quote_depth)
+      return [gl_cons(new_car, cdr), step, false] if step == 0
+      new_cdr, step, completed2 = cdr.eval_quote(step, quote_depth)
+      return [gl_cons(new_car, new_cdr), step, completed1 && completed2]
+
+    end
+
   end
 
   def eval_quote_fbody(step, quote_depth)
@@ -720,7 +781,43 @@ class ConsGlispObject < GlispObject
   end
 
   def eval_quote_symbol(stack, step, quote_depth)
-    raise RuntimeError, "TODO"
+
+    sym = car_symbol_or(nil)
+    value = cdr_car_or(nil)
+
+    if sym == :quote then
+      # eval_symbol から呼び出された最初は必ずこの分岐に入る
+
+      if value == nil then
+        return [gl_nil, step - 1]
+      end
+      value, step = value.eval_quote_symbol(stack, step, quote_depth + 1)
+      return [gl_list2(:quote, value), step] if quote_depth > 0 or step == 0
+      return [gl_list2(:"eval-result", value), step - 1]
+
+    elsif sym == :unquote then
+
+      if value == nil then
+        return [gl_nil, step - 1]
+      end
+      if quote_depth == 1 then
+        value, step = value.eval_symbol(stack, step)
+        return [gl_list2(:unquote, value), step] if step == 0 or not value.is_permanent
+        return [value.decode, step - 1]
+      else
+        value, step = value.eval_quote_symbol(stack, step, quote_depth - 1)
+        return [gl_list2(:unquote, value), step]
+      end
+
+    else
+
+      new_car, step = car.eval_quote_symbol(stack, step, quote_depth)
+      return [gl_cons(new_car, cdr), step] if step == 0
+      new_cdr, step = cdr.eval_quote_symbol(stack, step, quote_depth)
+      return [gl_cons(new_car, new_cdr), step]
+
+    end
+
   end
 
   def eval_fcall(step, args)
@@ -943,6 +1040,16 @@ def do_test
                '( + 1 2 )',
                '( <+> 1 2 )',
                '3',
+              ])
+
+  do_test_sub(stack,
+              '(quote (1 (unquote (+ 1 2))))',
+              [
+               '( quote ( 1 ( unquote ( + 1 2 ) ) ) )',
+               '( quote ( 1 ( unquote ( <+> 1 2 ) ) ) )',
+               '( quote ( 1 ( unquote 3 ) ) )',
+               '( quote ( 1 3 ) )',
+               '( eval-result ( 1 3 ) )',
               ])
 
 end
