@@ -11,6 +11,8 @@ UNDEFINED = :"*undefined*"
 EOF = :"*EOF*"
 
 LET = :"*let*"
+FUNC = :"*func*"
+MACRO = :"*macro*"
 
 class ConsGl
 
@@ -56,11 +58,6 @@ class ConsGl
     @cdr
   end
 
-  def second
-    raise IndexError if not @cdr.is_a? ConsGl
-    return @cdr.car
-  end
-
   def gets(count)
     _gets_sub([], count)
   end
@@ -69,9 +66,14 @@ class ConsGl
     if count == 0
       arr.push(self)
     else
-      arr.push(@car)
-      raise IndexError if not @cdr.is_a? ConsGl
-      @cdr._gets_sub(arr, count - 1)
+      arr.push(gl_resolved(@car))
+      d = gl_resolved(@cdr)
+      if d.nil? && count == 1 then
+        arr.push(nil)
+        return arr
+      end
+      raise IndexError if not d.is_a? ConsGl
+      d._gets_sub(arr, count - 1)
     end
     return arr
   end
@@ -85,7 +87,7 @@ class ConsGl
       k = @car.car
       if ! k.nil? && k == key then
         begin
-          v = @car.second
+          v = @car.cdr
           return [0, v]
         rescue IndexError
           # nothing
@@ -282,10 +284,10 @@ def gl_eval(expr)
   return expr._eval
 end
 
-def gl_eval_root(expr)
-  stack = build_initial_stack
+def gl_eval_root(expr, stack)
   expr = _gl_eval_symbol(stack, expr)
-  return gl_resolved(expr)
+  result = gl_resolved(expr)
+  return [result, stack]
 end
 
 def _gl_eval_symbol(stack, expr)
@@ -296,29 +298,18 @@ def _gl_eval_symbol(stack, expr)
     return value if not value.is_a? ConsGl
     return gl_cons(EVAL_RESULT, value)
   elsif expr.is_a? ConsGl then
-    car = expr.car
-    cdr = expr.cdr
+    car = gl_resolved(expr.car)
+    cdr = gl_resolved(expr.cdr)
     if car == LET then
-      return expr if cdr.nil?
-      begin
-        pair, target, = cdr.gets(2)
-      rescue IndexError
-        return expr
-      end
-      if pair.is_a? Symbol then
-        target_stack = gl_cons(gl_list2(pair, UNDEFINED), stack)
-        return _gl_eval_symbol(target_stack, target)
-      end
-      if not pair.is_a? ConsGl then
-        return _gl_eval_symbol(stack, target)
-      end
-      begin
-        sym, value, = pair.gets(2)
-      rescue IndexError
-        target = _gl_eval_symbol(target)
-        return gl_list(LET, pair, target)
-      end
-      target_stack = gl_cons(gl_list2(sym, value), stack)
+      sym, value, target = _gl_eval_parse_let(cdr)
+      return expr if target.nil?
+      return _gl_eval_symbol(stack, target) if sym.nil?
+      value = UNDEFINED if _gl_eval_exists_undefined(value)
+      target_stack = gl_cons(gl_cons(sym, value), stack)
+      return _gl_eval_symbol(target_stack, target)
+    elsif car == FUNC then
+      target_stack = gl_cons(gl_cons(:'_', UNDEFINED), stack)
+      target = cdr
       return _gl_eval_symbol(target_stack, target)
     else
       car = _gl_eval_symbol(stack, car)
@@ -330,14 +321,48 @@ def _gl_eval_symbol(stack, expr)
   end
 end
 
+def _gl_eval_exists_undefined(expr)
+  if expr.is_a? Symbol then
+    return expr == UNDEFINED
+  elsif expr.is_a? ConsGl then
+    return true if _gl_eval_exists_undefined(expr.car)
+    return _gl_eval_exists_undefined(expr.cdr)
+  else
+    return false
+  end
+end
+
+# [シンボル, 値, 式] を返す
+def _gl_eval_parse_let(expr)
+  return [nil, nil, nil] if expr.nil?
+  begin
+    pair, target, = expr.gets(2)
+  rescue IndexError
+    return [nil, nil, nil]
+  end
+  if pair.is_a? Symbol then
+    return [pair, UNDEFINED, target]
+  end
+  if not pair.is_a? ConsGl then
+    return [nil, nil, target]
+  end
+  sym = gl_resolved(pair.car)
+  value = gl_resolved(pair.cdr)
+  return [sym, value, target]
+end
+
 def build_initial_stack
   gl_list(
-          gl_list2(:eval, EVAL),
+          gl_cons(:eval, EVAL),
+          gl_cons(:let, LET),
           _build_basic_operator('+', -1, false) do |*xs|
             xs.inject(0) {|a, b| a + b}
           end,
           _build_basic_operator('-', 2, false) do |x, y|
             x - y
+          end,
+          _build_basic_operator('*', -1, false) do |*xs|
+            xs.inject(1) {|a, b| a * b}
           end,
           _build_basic_operator('/', 2, false) do |x, y|
             x / y
@@ -355,7 +380,7 @@ def _build_basic_operator(name, args_count, is_special)
   f = proc do |*xs|
     yield(*xs)
   end
-  gl_list2(name.to_sym, ProcGl.new(f, name, args_count, is_special))
+  gl_cons(name.to_sym, ProcGl.new(f, name, args_count, is_special))
 end
 
 def _builtin_car(t)
@@ -385,7 +410,7 @@ class Reader
     t = _read_token
     case t
     when :'(' then
-      return _read_list
+      return _read_list(true)
     when :')' then
       raise StandardError, 'unexpected: ' + t.to_s
     when :'`' then
@@ -397,17 +422,23 @@ class Reader
     end
   end
 
-  def _read_list
+  def _read_list(is_start)
     t = _read_token
     case t
     when :')' then
       return nil
+    when :'.' then
+      raise StandardError, 'unexpected: \'.\'' if is_start
+      tail = _read_expr
+      t = _read_token
+      raise StandardError, 'expected: \')\', but: ' + t.to_s if t != :')'
+      return tail
     when EOF then
       raise StandardError, 'unexpected: ' + t.to_s
     else
       _read_back(t)
       head = _read_expr
-      tail = _read_list
+      tail = _read_list(false)
       return gl_cons(head, tail)
     end
   end
@@ -481,15 +512,19 @@ def do_test
                ['"abc"', '"abc"'],
                ['abc', 'abc'],
                ['(1 2 3)', '(1 2 3)'],
+               ['(1 2 . (3 4))', '(1 2 3 4)'],
                ['(eval + 1 2)', '3'],
                ['(eval +)', '0'],
                ['(eval + 1)', '1'],
                ['(eval - 10 (+ 1 2))', '7'],
                ['(1 eval + 2 3)', '(1 *eval* *+* 2 3)'],
+               ['(1 . 2)', '(1 . 2)'],
                ['(eval cdr (*eval-result* 1 eval + 2 3))', '5'],
+               ['(eval cdr (*eval-result* 1 . (eval + 2 3)))', '5'],
                ['(eval *eval-result* 1 2 (eval + 3 4))', '(1 2 (*eval* *+* 3 4))'],
                ['(eval / 1 0)', '(*eval-error* */* 1 0)'],
                ['', '*EOF*'],
+               ['(eval *let* (a . 3) (+ a 2))', '5'],
               ]
   count = 0
   test_case.each do |c|
@@ -504,7 +539,8 @@ def do_expr_test(input, expected)
   io = StringIO.new(input)
   reader = Reader.new(io)
   expr = reader.read
-  result = gl_eval_root(expr)
+  stack = build_initial_stack
+  result, stack = gl_eval_root(expr, stack)
   result_s = gl_to_s(result)
   if result_s == expected then
     print "  OK    input: %s\n       output: %s\n" % [input, result_s]
