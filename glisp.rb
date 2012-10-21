@@ -258,6 +258,8 @@ def gl_eval(expr)
   return gl_list0(EVAL_ERROR, func, args) if ! args.nil? && ! args.is_a?(ConsGl)
   if func == EVAL_RESULT then
     return args
+  elsif func == FUNC then
+    return expr
   elsif func.is_a? ProcGl then
     if args.nil? then
       proc_args = []
@@ -280,7 +282,17 @@ def gl_eval(expr)
       return gl_list0(EVAL_ERROR, func, args)
     end
   elsif func.is_a? ConsGl then
-    return 9999 # TODO
+    func_head = gl_resolved(func.car)
+    if func_head == FUNC then
+      func_tail = gl_resolved(func.cdr)
+      return func if not func_tail.is_a? ConsGl
+      func_body = gl_resolved(func_tail.car)
+      stack = gl_cons(gl_cons(:'_', args), nil)
+      result = _gl_eval_symbol(stack, func_body)
+      return gl_eval(result)
+    else
+      return func
+    end
   else
     return func
   end
@@ -298,15 +310,16 @@ def _gl_eval_symbol(stack, expr)
     cdr = gl_resolved(expr.cdr)
     if car == LET then
       sym, value, target = _gl_eval_parse_let(cdr)
-      return expr if target.nil?
+      return expr if target == UNDEFINED
       return _gl_eval_symbol(stack, target) if sym.nil?
       value = UNDEFINED if _gl_eval_exists_undefined(value)
       target_stack = gl_cons(gl_cons(sym, value), stack)
       return _gl_eval_symbol(target_stack, target)
     elsif car == FUNC then
+      target = _gl_eval_parse_func(cdr)
+      return expr if target == UNDEFINED
       target_stack = gl_cons(gl_cons(:'_', UNDEFINED), stack)
-      target = cdr
-      return _gl_eval_symbol(target_stack, target)
+      return gl_list2(FUNC, _gl_eval_symbol(target_stack, target))
     else
       car = _gl_eval_symbol(stack, car)
       cdr = _gl_eval_symbol(stack, cdr)
@@ -329,12 +342,12 @@ def _gl_eval_exists_undefined(expr)
 end
 
 # [シンボル, 値, 式] を返す
-def _gl_eval_parse_let(expr)
-  return [nil, nil, nil] if expr.nil?
+def _gl_eval_parse_let(expr_cdr)
+  return [nil, nil, UNDEFINED] if expr_cdr.nil?
   begin
-    pair, target, = expr.gets(2)
+    pair, target, = expr_cdr.gets(2)
   rescue IndexError
-    return [nil, nil, nil]
+    return [nil, nil, UNDEFINED]
   end
   if pair.is_a? Symbol then
     return [pair, UNDEFINED, target]
@@ -345,6 +358,17 @@ def _gl_eval_parse_let(expr)
   sym = gl_resolved(pair.car)
   value = gl_resolved(pair.cdr)
   return [sym, value, target]
+end
+
+# 関数定義本体の式を返す
+def _gl_eval_parse_func(expr_cdr)
+  return UNDEFINED if expr_cdr.nil?
+  begin
+    target, = expr_cdr.gets(1)
+  rescue IndexError
+    return UNDEFINED
+  end
+  return target
 end
 
 def build_initial_stack
@@ -521,9 +545,9 @@ def do_test
                ['(eval / 1 0)', '(*eval-error* */* 1 0)'],
                ['', '*EOF*'],
                ['(eval *let* (a . 3) (+ a 2))', '5'],
-               ['(eval (*func* (+ _ 1)) 3)', '4'],
-               ['(eval *let* (a . 10) (*func* (+ _ a)))', '(*func* (+ _ 10)))'],
-               ['(eval *let* (a . 10) ((*func* (+ _ a)) 3))', '13'],
+               ['(eval (*func* (+ (car _) 1)) 3)', '4'],
+               ['(eval *let* (a . 10) (*func* (+ (car _) a)))', '(*func* (*+* (*car* _) 10))'],
+               ['(eval *let* (a . 10) ((*func* (+ (car _) a)) 3))', '13'],
               ]
   count = 0
   test_case.each do |c|
