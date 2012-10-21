@@ -247,6 +247,20 @@ end
 
 def gl_eval_root(expr, stack)
   expr = _gl_eval_symbol(stack, expr)
+  if expr.is_a? ConsGl then
+    car = gl_resolved(expr.car)
+    if car == LET then
+      _, pair, = expr.gets(2)
+      if pair.is_a? ConsGl then
+        sym = gl_resolved(pair.car)
+        if sym.is_a? Symbol then
+          value = gl_resolved(pair.cdr)
+          stack = gl_cons(gl_cons(sym, value), stack)
+          return [value, stack]
+        end
+      end
+    end
+  end
   result = gl_resolved(expr)
   return [result, stack]
 end
@@ -356,6 +370,7 @@ def _gl_eval_parse_let(expr_cdr)
     return [nil, nil, target]
   end
   sym = gl_resolved(pair.car)
+  return [nil, nil, target] if not sym.is_a? Symbol
   value = gl_resolved(pair.cdr)
   return [sym, value, target]
 end
@@ -372,6 +387,15 @@ def _gl_eval_parse_func(expr_cdr)
 end
 
 def build_initial_stack
+  stack = _build_initial_stack_1
+  _build_initial_script.each do |script|
+    expr = gl_parse_source(script)
+    result, stack = gl_eval_root(expr, stack)
+  end
+  return stack
+end
+
+def _build_initial_stack_1
   gl_list(
           gl_cons(:eval, EVAL),
           gl_cons(:let, LET),
@@ -411,6 +435,16 @@ end
 def _builtin_cdr(t)
   return gl_list(EVAL_ERROR, :'*cdr*', t) if not t.is_a? ConsGl
   return gl_resolved(t.cdr)
+end
+
+def _build_initial_script
+  ['']
+end
+
+def gl_parse_source(input)
+  io = StringIO.new(input)
+  reader = Reader.new(io)
+  reader.read
 end
 
 class Reader
@@ -559,9 +593,7 @@ def do_test
 end
 
 def do_expr_test(input, expected)
-  io = StringIO.new(input)
-  reader = Reader.new(io)
-  expr = reader.read
+  expr = gl_parse_source(input)
   stack = build_initial_stack
   result, stack = gl_eval_root(expr, stack)
   result_s = gl_to_s(result)
