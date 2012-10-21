@@ -123,41 +123,7 @@ class ConsGl
   def _resolve
     raise Exception if @car != EVAL
     return nil if not @cdr.is_a? ConsGl
-    return @cdr.resolved._eval
-  end
-
-  def _eval
-    func = gl_resolved(@car)
-    args = gl_resolved(@cdr)
-    return gl_list0(EVAL_ERROR, func, args) if ! args.nil? && ! args.is_a?(ConsGl)
-    if func == EVAL_RESULT then
-      return args
-    elsif func.is_a? ProcGl then
-      if args.nil? then
-        proc_args = []
-        is_success = true
-      else
-        begin
-          proc_args, is_success = args._args_to_array(func.args_count, func.is_special)
-        rescue IndexError => ex
-          return gl_list0(EVAL_ERROR, func, args)
-        end
-      end
-      if ! is_success then
-        args = gl_list(* proc_args) if ! args.nil?
-        return gl_list0(EVAL_ERROR, func, args)
-      end
-      begin
-        return func.proc.call(* proc_args)
-      rescue
-        args = gl_list(* proc_args) if ! args.nil?
-        return gl_list0(EVAL_ERROR, func, args)
-      end
-    elsif func.is_a? ConsGl then
-      return 9999 # TODO
-    else
-      return func
-    end
+    return gl_eval(@cdr.resolved)
   end
 
   # 関数呼び出しの引数ために配列にする
@@ -279,15 +245,45 @@ def gl_resolved_or_self(expr)
   return expr.resolved_or_self
 end
 
-def gl_eval(expr)
-  return expr if not expr.is_a? ConsGl
-  return expr._eval
-end
-
 def gl_eval_root(expr, stack)
   expr = _gl_eval_symbol(stack, expr)
   result = gl_resolved(expr)
   return [result, stack]
+end
+
+def gl_eval(expr)
+  return expr if not expr.is_a? ConsGl
+  func = gl_resolved(expr.car)
+  args = gl_resolved(expr.cdr)
+  return gl_list0(EVAL_ERROR, func, args) if ! args.nil? && ! args.is_a?(ConsGl)
+  if func == EVAL_RESULT then
+    return args
+  elsif func.is_a? ProcGl then
+    if args.nil? then
+      proc_args = []
+      is_success = true
+    else
+      begin
+        proc_args, is_success = args._args_to_array(func.args_count, func.is_special)
+      rescue IndexError => ex
+        return gl_list0(EVAL_ERROR, func, args)
+      end
+    end
+    if ! is_success then
+      args = gl_list(* proc_args) if ! args.nil?
+      return gl_list0(EVAL_ERROR, func, args)
+    end
+    begin
+      return func.proc.call(* proc_args)
+    rescue
+      args = gl_list(* proc_args) if ! args.nil?
+      return gl_list0(EVAL_ERROR, func, args)
+    end
+  elsif func.is_a? ConsGl then
+    return 9999 # TODO
+  else
+    return func
+  end
 end
 
 def _gl_eval_symbol(stack, expr)
@@ -525,6 +521,9 @@ def do_test
                ['(eval / 1 0)', '(*eval-error* */* 1 0)'],
                ['', '*EOF*'],
                ['(eval *let* (a . 3) (+ a 2))', '5'],
+               ['(eval (*func* (+ _ 1)) 3)', '4'],
+               ['(eval *let* (a . 10) (*func* (+ _ a)))', '(*func* (+ _ 10)))'],
+               ['(eval *let* (a . 10) ((*func* (+ _ a)) 3))', '13'],
               ]
   count = 0
   test_case.each do |c|
