@@ -79,6 +79,7 @@ class ConsGl
   end
 
   # キーと値のペアのリストを対象にキーから値を取得する。
+  # インデックス, 値, リストのマッチして以降のリストを返す。
   # スタックを想定しており、
   # 遅延評価の解決はいっさいしない。
   # ただし、値に遅延評価が含まれているのは構わない。
@@ -88,16 +89,16 @@ class ConsGl
       if ! k.nil? && k == key then
         begin
           v = @car.cdr
-          return [0, v]
+          return [0, v, self]
         rescue IndexError
           # nothing
         end
       end
     end
-    return [false, nil] if not @cdr.is_a? ConsGl
-    index, value = @cdr.get_by_key(key)
-    return [index + 1, value] if index
-    return [false, nil]
+    return [false, nil, nil] if not @cdr.is_a? ConsGl
+    index, value, tail = @cdr.get_by_key(key)
+    return [index + 1, value, tail] if index
+    return [false, nil, nil]
   end
 
   def is_resolved
@@ -246,7 +247,6 @@ def gl_resolved_or_self(expr)
 end
 
 def gl_eval_root(expr, stack)
-  expr = _gl_eval_symbol(stack, expr)
   if expr.is_a? ConsGl then
     car = gl_resolved(expr.car)
     if car == LET then
@@ -255,12 +255,14 @@ def gl_eval_root(expr, stack)
         sym = gl_resolved(pair.car)
         if sym.is_a? Symbol then
           value = gl_resolved(pair.cdr)
+          value = _gl_eval_symbol(stack, value)
           stack = gl_cons(gl_cons(sym, value), stack)
           return [value, stack]
         end
       end
     end
   end
+  expr = _gl_eval_symbol(stack, expr)
   result = gl_resolved(expr)
   return [result, stack]
 end
@@ -312,11 +314,17 @@ end
 
 def _gl_eval_symbol(stack, expr)
   if expr.is_a? Symbol then
-    return _gl_eval_symbol_symbol(stack, expr)
+
+    result, = _gl_eval_symbol_symbol(stack, expr)
+    return result
+
   elsif expr.is_a? ConsGl then
-    car = expr.car
-    cdr = expr.cdr
+
+    car = gl_resolved(expr.car)
+    cdr = gl_resolved(expr.cdr)
+
     if car == LET then
+
       sym, value, target = _gl_eval_parse_let(cdr)
       return expr if target == UNDEFINED
       return _gl_eval_symbol(stack, target) if sym.nil?
@@ -326,27 +334,53 @@ def _gl_eval_symbol(stack, expr)
       target_result = _gl_eval_symbol(target_stack, target)
       return target_result if value2 = UNDEFINED
       return gl_list0(LET, gl_cons(sym, value), target_result)
+
     elsif car == FUNC then
+
       target = cdr
       return expr if target == nil
       target_stack = gl_cons(gl_cons(:'_', UNDEFINED), stack)
       return gl_cons(FUNC, _gl_eval_symbol(target_stack, target))
+
+    elsif car.is_a? Symbol then
+
+      car, stack_tail = _gl_eval_symbol_symbol(stack, car)
+
+      # マクロかどうかを調べて、マクロの場合は特別な処理
+      if car.is_a? ConsGl then
+        label = gl_resolved(car.car)
+        if label == MACRO then
+          macro_body = car.cdr
+          macro_result = _gl_eval_symbol_eval_macro(macro_body, cdr)
+          return _gl_eval_symbol(stack_tail, macro_result)
+        end
+      end
+
+      # マクロでなかった場合
+      cdr = _gl_eval_symbol(stack, cdr)
+      return gl_cons(car, cdr)
+
     else
+
       car = _gl_eval_symbol(stack, car)
       cdr = _gl_eval_symbol(stack, cdr)
       return gl_cons(car, cdr)
+
     end
+
   else
+
     return expr
+
   end
 end
 
 def _gl_eval_symbol_symbol(stack, symbol)
-  index, value = stack.get_by_key(symbol)
-  return symbol if value == UNDEFINED
-  return symbol if ! index
-  return value if not value.is_a? ConsGl
-  return gl_cons(EVAL_RESULT, value)
+  index, value, tail = stack.get_by_key(symbol)
+  return [symbol, nil] if value == UNDEFINED
+  return [symbol, nil] if ! index
+  return [value, tail] if not value.is_a? ConsGl
+  return [gl_cons(EVAL_RESULT, value), tail]
 end
 
 def _gl_eval_symbol_exists_undefined(expr)
@@ -361,6 +395,9 @@ def _gl_eval_symbol_exists_undefined(expr)
 end
 
 def _gl_eval_symbol_eval_macro(macro_body, args)
+  stack = gl_cons(:'_', args)
+  macro_body = _gl_eval_symbol(stack, macro_body)
+  return gl_eval(macro_body)
 end
 
 # [シンボル, 値, 式] を返す
@@ -432,7 +469,7 @@ def _builtin_cdr(t)
 end
 
 def _build_initial_script
-  ['']
+  ['(*let* (func-one-arg . (macro . 1)))']
 end
 
 def gl_parse_source(input)
@@ -576,6 +613,7 @@ def do_test
                ['(eval (*func* . (+ (car _) 1)) 3)', '4'],
                ['(eval *let* (a . 10) . (*func* . (+ (car _) a)))', '(*func* *+* (*car* _) 10)'],
                ['(eval *let* (a . 10) . ((*func* . (+ (car _) a)) 3))', '13'],
+               ['(func-one-arg)', '*EOF*'],
               ]
   count = 0
   test_case.each do |c|
