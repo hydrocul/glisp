@@ -3,15 +3,14 @@
 
 require 'stringio'
 
-
-EVAL = :"*eval*"
+EVAL       = :"*eval*"
 EVAL_ERROR = :"*eval-error*"
-EVAL_RESULT = :"*eval-result*"
-UNDEFINED = :"*undefined*"
-EOF = :"*EOF*"
+QUOTE      = :"*quote*"
+UNDEFINED  = :"*undefined*"
+EOF        = :"*EOF*"
 
-LET = :"*let*"
-FUNC = :"*func*"
+LET   = :"*let*"
+FUNC  = :"*func*"
 MACRO = :"*macro*"
 
 class ConsGl
@@ -19,7 +18,7 @@ class ConsGl
   def initialize(car, cdr)
     @car = car
     @cdr = cdr
-    if is_resolved then
+    if is_resolved or is_error then
       @resolved = self
     else
       @resolved = UNDEFINED
@@ -68,37 +67,14 @@ class ConsGl
     else
       arr.push(gl_resolved(@car))
       d = gl_resolved(@cdr)
-      if d.nil? && count == 1 then
-        arr.push(nil)
+      if ! d.is_a?(ConsGl) && count == 1 then
+        arr.push(d)
         return arr
       end
       raise IndexError if not d.is_a? ConsGl
       d._gets_sub(arr, count - 1)
     end
     return arr
-  end
-
-  # キーと値のペアのリストを対象にキーから値を取得する。
-  # インデックス, 値, リストのマッチして以降のリストを返す。
-  # スタックを想定しており、
-  # 遅延評価の解決はいっさいしない。
-  # ただし、値に遅延評価が含まれているのは構わない。
-  def get_by_key(key)
-    if @car.is_a? ConsGl then
-      k = @car.car
-      if ! k.nil? && k == key then
-        begin
-          v = @car.cdr
-          return [0, v, self]
-        rescue IndexError
-          # nothing
-        end
-      end
-    end
-    return [false, nil, nil] if not @cdr.is_a? ConsGl
-    index, value, tail = @cdr.get_by_key(key)
-    return [index + 1, value, tail] if index
-    return [false, nil, nil]
   end
 
   def is_resolved
@@ -112,7 +88,7 @@ class ConsGl
   def resolved
     return @resolved if @resolved != UNDEFINED
     @resolved = _resolve
-    raise Exception if ! gl_is_resolved(@resolved)
+    raise Exception if ! gl_is_resolved(@resolved) &&  ! gl_is_error(@resolved)
     return @resolved
   end
 
@@ -122,46 +98,19 @@ class ConsGl
   end
 
   def _resolve
-    raise Exception if @car != EVAL
-    return nil if not @cdr.is_a? ConsGl
-    return gl_eval(@cdr.resolved)
-  end
-
-  # 関数呼び出しの引数ために配列にする
-  # count は必要な引数の数で、-1は無制限
-  def _args_to_array(count, is_special)
-    r = resolved
-    return [[], true] if r.nil? && count <= 0
-    raise IndexError if not r.is_a? ConsGl
-    r._args_to_array_sub([], count, is_special)
-  end
-
-  def _args_to_array_sub(arr, count, is_special)
-    return [arr, true] if count == 0
-    is_success = true
-    if is_special then
-      arr.push(gl_resolved_or_self(car))
-    else
-      a = gl_eval(car)
-      is_success = false if gl_is_error(car)
-      arr.push(a)
-    end
-    tail = gl_resolved(cdr)
-    return [arr, is_success] if tail.nil? && count <= 1
-    raise IndexError if not tail.is_a? ConsGl
-    arr, tail_is_success = tail._args_to_array_sub(arr, count - 1, is_special)
-    return [arr, is_success && tail_is_success]
+    return self if @car != EVAL
+    return gl_eval_to_value(@cdr)
   end
 
 end # ConsGl
 
 class ProcGl
 
-  def initialize(proc, name, args_count, is_special)
+  def initialize(proc, name, args_count, is_force)
     @proc = proc
     @name = name
     @args_count = args_count
-    @is_special = is_special
+    @is_force = is_force
   end
 
   def ==(other)
@@ -184,8 +133,8 @@ class ProcGl
     @args_count
   end
 
-  def is_special
-    @is_special
+  def is_force
+    @is_force
   end
 
 end # ProcGl
@@ -246,163 +195,164 @@ def gl_resolved_or_self(expr)
   return expr.resolved_or_self
 end
 
+def gl_wrap_eval(expr)
+  return expr if not expr.is_a? ConsGl
+  return gl_cons(EVAL, expr)
+end
+
+def gl_wrap_eval_error(expr)
+  return expr if not expr.is_a? ConsGl
+  return gl_cons(EVAL_ERROR, expr)
+end
+
+def gl_wrap_quote(expr)
+  return expr if not expr.is_a? ConsGl
+  return gl_cons(QUOTE, expr)
+end
+
+def gl_eval_to_value(expr)
+  result, success_flag = gl_eval(expr)
+  return result if success_flag
+  return gl_wrap_eval_error(result)
+end
+
 def gl_eval_root(expr, stack)
-  if expr.is_a? ConsGl then
-    car = gl_resolved(expr.car)
-    if car == LET then
-      _, pair, = expr.gets(2)
-      if pair.is_a? ConsGl then
-        sym = gl_resolved(pair.car)
-        if sym.is_a? Symbol then
-          value = gl_resolved(pair.cdr)
-          value = _gl_eval_symbol(stack, value)
-          stack = gl_cons(gl_cons(sym, value), stack)
-          return [value, stack]
-        end
-      end
-    end
-  end
-  expr = _gl_eval_symbol(stack, expr)
-  result = gl_resolved(expr)
+  expr = gl_eval_symbol_eval(stack, expr)
+  result, success_flag, stack2 = gl_eval(expr)
+  return [gl_wrap_eval_error(result), stack] if not success_flag
+  stack = _gl_push_stack(stack, stack2)
   return [result, stack]
 end
 
+def _gl_push_stack(stack, stack_head)
+  return stack if stack_head.nil?
+  stack = _gl_push_stack(stack, stack_head.cdr)
+  return gl_cons(stack_head, stack)
+end
+
+# [結果, 評価成功かどうか, スタック] を返す。
+# エラーの場合は2つ目として false を返す。
+# この関数では EVAL_ERROR をつけない。
+# 3つ目の返り値は REPL のため。
 def gl_eval(expr)
-  return expr if not expr.is_a? ConsGl
+
+  return [expr, true, nil] if not expr.is_a? ConsGl
+
   func = gl_resolved(expr.car)
   args = gl_resolved(expr.cdr)
-  return gl_list0(EVAL_ERROR, func, args) if ! args.nil? && ! args.is_a?(ConsGl)
-  if func == EVAL_RESULT then
-    return args
-  elsif func == FUNC then
-    return expr
-  elsif func.is_a? ProcGl then
-    if args.nil? then
-      proc_args = []
-      is_success = true
-    else
-      begin
-        proc_args, is_success = args._args_to_array(func.args_count, func.is_special)
-      rescue IndexError => ex
-        return gl_list0(EVAL_ERROR, func, args)
-      end
-    end
-    if ! is_success then
-      args = gl_list(* proc_args) if ! args.nil?
-      return gl_list0(EVAL_ERROR, func, args)
-    end
-    begin
-      return func.proc.call(* proc_args)
-    rescue
-      args = gl_list(* proc_args) if ! args.nil?
-      return gl_list0(EVAL_ERROR, func, args)
-    end
-  elsif func.is_a? ConsGl then
-    func_head = gl_resolved(func.car)
-    if func_head == FUNC then
-      func_body = gl_resolved(func.cdr)
-      stack = gl_cons(gl_cons(:'_', args), nil)
-      result = _gl_eval_symbol(stack, func_body)
-      return gl_eval(result)
-    else
-      return func
-    end
-  else
-    return func
+
+  return [gl_cons(func, args), false, nil] if ! args.nil? && ! args.is_a?(ConsGl)
+
+  if func == QUOTE then
+
+    return [args, true, nil]
+
+  elsif func == EVAL_ERROR then
+
+    return [args, false, nil]
+
+  elsif func == LET then
+
+    sym, value, target = _gl_eval_parse_let(args)
+    return [gl_cons(LET, args), false] if target == UNDEFINED
+    return [gl_cons(LET, args), false] if sym.nil?
+    value2 = gl_wrap_eval(value)
+    target_stack = gl_cons(gl_cons(sym, value2), nil)
+    target_result = gl_eval_symbol_eval(target_stack, target)
+    target_result, success_flag = gl_eval(target_result)
+    return [target_result, success_flag]
+
   end
+
+  return [gl_cons(func, args), false, nil]
+
 end
 
-def _gl_eval_symbol(stack, expr)
-  if expr.is_a? Symbol then
+def gl_eval_symbol_eval(stack, expr)
 
-    result, = _gl_eval_symbol_symbol(stack, expr)
+  if expr.is_a? Symbol then
+    result = _gl_eval_symbol_eval_symbol(stack, expr)
     return result
+  end
 
-  elsif expr.is_a? ConsGl then
+  return expr if not expr.is_a? ConsGl
 
-    car = gl_resolved(expr.car)
-    cdr = gl_resolved(expr.cdr)
+  func = expr.car
+  args = expr.cdr
 
-    if car == LET then
+  return gl_cons(func, args) if ! args.nil? && ! args.is_a?(ConsGl)
 
-      sym, value, target = _gl_eval_parse_let(cdr)
-      return expr if target == UNDEFINED
-      return _gl_eval_symbol(stack, target) if sym.nil?
-      value2 = value
-      value2 = UNDEFINED if _gl_eval_symbol_exists_undefined(value)
-      target_stack = gl_cons(gl_cons(sym, value2), stack)
-      target_result = _gl_eval_symbol(target_stack, target)
-      return target_result if value2 = UNDEFINED
-      return gl_list0(LET, gl_cons(sym, value), target_result)
+  if func == QUOTE then
 
-    elsif car == FUNC then
+    return gl_cons(QUOTE, gl_eval_symbol_value(stack, args))
 
-      target = cdr
-      return expr if target == nil
-      target_stack = gl_cons(gl_cons(:'_', UNDEFINED), stack)
-      return gl_cons(FUNC, _gl_eval_symbol(target_stack, target))
+  elsif func == EVAL_ERROR then
 
-    elsif car.is_a? Symbol then
+    return gl_cons(EVAL_ERROR, args)
 
-      car, stack_tail = _gl_eval_symbol_symbol(stack, car)
+  elsif func == LET then
 
-      # マクロかどうかを調べて、マクロの場合は特別な処理
-      if car.is_a? ConsGl then
-        label = gl_resolved(car.car)
-        if label == MACRO then
-          macro_body = car.cdr
-          macro_result = _gl_eval_symbol_eval_macro(macro_body, cdr)
-          return _gl_eval_symbol(stack_tail, macro_result)
-        end
-      end
-
-      # マクロでなかった場合
-      cdr = _gl_eval_symbol(stack, cdr)
-      return gl_cons(car, cdr)
-
-    else
-
-      car = _gl_eval_symbol(stack, car)
-      cdr = _gl_eval_symbol(stack, cdr)
-      return gl_cons(car, cdr)
-
-    end
-
-  else
-
-    return expr
+    sym, value, target = _gl_eval_parse_let(args)
+    return gl_cons(LET, args) if target == UNDEFINED
+    return gl_cons(LET, args) if sym.nil?
+    value2 = gl_wrap_eval(value)
+    value2 = UNDEFINED if _gl_eval_symbol_exists_undefined(value)
+    target_stack = gl_cons(gl_cons(sym, value2), stack)
+    target_result = gl_eval_symbol_eval(target_stack, target)
+    return target_result if value2 != UNDEFINED
+    return gl_list0(LET, gl_cons(sym, value), target_result)
 
   end
+
+  return expr # TODO
+
 end
 
-def _gl_eval_symbol_symbol(stack, symbol)
-  index, value, tail = stack.get_by_key(symbol)
-  return [symbol, nil] if value == UNDEFINED
-  return [symbol, nil] if ! index
-  return [value, tail] if not value.is_a? ConsGl
-  return [gl_cons(EVAL_RESULT, value), tail]
-end
+def gl_eval_symbol_value(stack, expr)
 
-def _gl_eval_symbol_exists_undefined(expr)
   if expr.is_a? Symbol then
-    return expr == UNDEFINED
-  elsif expr.is_a? ConsGl then
-    return true if _gl_eval_symbol_exists_undefined(expr.car)
-    return _gl_eval_symbol_exists_undefined(expr.cdr)
-  else
-    return false
+    result = _gl_eval_symbol_value_symbol(stack, expr)
+    return result
   end
+
+  return expr if not expr.is_a? ConsGl
+
+  func = expr.car
+  args = expr.cdr
+
+  return gl_cons(func, args) if ! args.nil? && ! args.is_a?(ConsGl)
+
+  if func == EVAL then
+
+    return gl_cons(EVAL, gl_eval_symbol_eval(stack, args))
+
+  end
+
+
+  return expr # TODO
+
 end
 
-def _gl_eval_symbol_eval_macro(macro_body, args)
-  stack = gl_cons(:'_', args)
-  macro_body = _gl_eval_symbol(stack, macro_body)
-  return gl_eval(macro_body)
+def _gl_eval_symbol_eval_symbol(stack, symbol)
+  index, value = _gl_get_by_key_from_stack(stack, symbol)
+  return symbol if value == UNDEFINED
+  return symbol if ! index
+  return value if not value.is_a? ConsGl
+  return value.cdr if value.car == EVAL
+  return gl_wrap_quote(value)
+end
+
+def _gl_eval_symbol_value_symbol(stack, symbol)
+  index, value = _gl_get_by_key_from_stack(stack, symbol)
+  return symbol if value == UNDEFINED
+  return symbol if ! index
+  return value
 end
 
 # [シンボル, 値, 式] を返す
 def _gl_eval_parse_let(expr_cdr)
   return [nil, nil, UNDEFINED] if expr_cdr.nil?
+  return [nil, nil, UNDEFINED] if not expr_cdr.is_a? ConsGl
   pair = gl_resolved(expr_cdr.car)
   target = gl_resolved(expr_cdr.cdr)
   if pair.is_a? Symbol then
@@ -417,61 +367,93 @@ def _gl_eval_parse_let(expr_cdr)
   return [sym, value, target]
 end
 
-def build_initial_stack
-  stack = _build_initial_stack_1
-  _build_initial_script.each do |script|
-    expr = gl_parse_source(script)
+def _gl_eval_symbol_exists_undefined(expr)
+  if expr.is_a? Symbol then
+    return expr == UNDEFINED
+  elsif not expr.is_a? ConsGl then
+    return false
+  end
+  return true if _gl_eval_symbol_exists_undefined(expr.car)
+  return _gl_eval_symbol_exists_undefined(expr.cdr)
+end
+
+# キーと値のペアのリストを対象にキーから値を取得する。
+# インデックス, 値を返す。
+# スタックを想定しており、
+# 遅延評価の解決はいっさいしない。
+# ただし、値に遅延評価が含まれているのは構わない。
+def _gl_get_by_key_from_stack(stack, key)
+  if stack.car.is_a? ConsGl then
+    k = stack.car.car
+    if ! k.nil? && k == key then
+      begin
+        v = gl_resolved_or_self(stack.car.cdr)
+        return [0, v]
+      rescue IndexError
+        # nothing
+      end
+    end
+  end
+  return [false, nil] if not stack.cdr.is_a? ConsGl
+  index, value = _gl_get_by_key_from_stack(stack.cdr, key)
+  return [index + 1, value] if index
+  return [false, nil]
+end
+
+def gl_build_initial_stack
+  stack = _gl_build_initial_stack_1
+  exprs = gl_parse_source(_gl_build_initial_script)
+  exprs.each do |expr|
     result, stack = gl_eval_root(expr, stack)
   end
   return stack
 end
 
-def _build_initial_stack_1
+def _gl_build_initial_stack_1
   gl_list(
-          gl_cons(:eval, EVAL),
-          gl_cons(:let, LET),
-          _build_basic_operator('+', -1, false) do |*xs|
+          _gl_build_basic_operator('+', -1, true) do |*xs|
             xs.inject(0) {|a, b| a + b}
           end,
-          _build_basic_operator('-', 2, false) do |x, y|
+          _gl_build_basic_operator('-', 2, true) do |x, y|
             x - y
           end,
-          _build_basic_operator('*', -1, false) do |*xs|
+          _gl_build_basic_operator('*', -1, true) do |*xs|
             xs.inject(1) {|a, b| a * b}
           end,
-          _build_basic_operator('/', 2, false) do |x, y|
+          _gl_build_basic_operator('/', 2, true) do |x, y|
             x / y
           end,
-          _build_basic_operator('car', 1, false) do |t|
-            _builtin_car(t)
+          _gl_build_basic_operator('car', 1, true) do |t|
+            _gl_builtin_car(t)
           end,
-          _build_basic_operator('cdr', 1, false) do |t|
-            _builtin_cdr(t)
+          _gl_build_basic_operator('cdr', 1, true) do |t|
+            _gl_builtin_cdr(t)
           end,
           )
 end
 
-def _build_basic_operator(name, args_count, is_special)
+def _gl_build_basic_operator(name, args_count, is_force)
   f = proc do |*xs|
     yield(*xs)
   end
-  gl_cons(name.to_sym, ProcGl.new(f, name, args_count, is_special))
+  gl_cons(name.to_sym, ProcGl.new(f, name, args_count, is_force))
 end
 
-def _builtin_car(t)
+def _gl_builtin_car(t)
   return gl_list(EVAL_ERROR, :'*car*', t) if not t.is_a? ConsGl
   return gl_resolved(t.car)
 end
 
-def _builtin_cdr(t)
+def _gl_builtin_cdr(t)
   return gl_list(EVAL_ERROR, :'*cdr*', t) if not t.is_a? ConsGl
   return gl_resolved(t.cdr)
 end
 
-def _build_initial_script
-  ['(*let* (func-one-arg . (macro . 1)))']
+def _gl_build_initial_script
+  ''
 end
 
+# input に含まれるS式をすべて読み込んで配列で返す
 def gl_parse_source(input)
   io = StringIO.new(input)
   reader = Reader.new(io)
@@ -488,7 +470,15 @@ class Reader
   end
 
   def read
-    _read_expr
+    ret = []
+    while true do
+      r = _read_expr
+      if r == EOF then
+        break
+      end
+      ret.push(r)
+    end
+    return ret
   end
 
   def _read_expr
@@ -498,10 +488,12 @@ class Reader
       return _read_list(true)
     when :')' then
       raise StandardError, 'unexpected: ' + t.to_s
+    when :'\'' then
+      return gl_cons(:quote, _read_expr)
     when :'`' then
-      return gl_list2(:quote, _read_expr)
+      return gl_cons(:quasiquote, _read_expr)
     when :',' then
-      return gl_list2(:unquote, _read_expr)
+      return gl_cons(:unquote, _read_expr)
     else
       return t
     end
@@ -543,7 +535,7 @@ class Reader
     end
     t = @buf.shift
     case t
-    when '(', ')', '`', ',', '.' then
+    when '(', ')', '\'', '`', ',', '.' then
       token = t.to_sym
     when 'true' then
       token = true
@@ -593,27 +585,32 @@ end # Reader
 def do_test
   test_case = [
                ['3', '3'],
-               ['3.14', '3.14'],
-               ['"abc"', '"abc"'],
-               ['abc', 'abc'],
-               ['(1 2 3)', '(1 2 3)'],
-               ['(1 2 . (3 4))', '(1 2 3 4)'],
-               ['(eval + 1 2)', '3'],
-               ['(eval +)', '0'],
-               ['(eval + 1)', '1'],
-               ['(eval - 10 (+ 1 2))', '7'],
-               ['(1 eval + 2 3)', '(1 *eval* *+* 2 3)'],
-               ['(1 . 2)', '(1 . 2)'],
-               ['(eval cdr (*eval-result* 1 eval + 2 3))', '5'],
-               ['(eval cdr (*eval-result* 1 . (eval + 2 3)))', '5'],
-               ['(eval *eval-result* 1 2 (eval + 3 4))', '(1 2 (*eval* *+* 3 4))'],
-               ['(eval / 1 0)', '(*eval-error* */* 1 0)'],
-               ['', '*EOF*'],
-               ['(eval *let* (a . 3) . (+ a 2))', '5'],
-               ['(eval (*func* . (+ (car _) 1)) 3)', '4'],
-               ['(eval *let* (a . 10) . (*func* . (+ (car _) a)))', '(*func* *+* (*car* _) 10)'],
-               ['(eval *let* (a . 10) . ((*func* . (+ (car _) a)) 3))', '13'],
-               ['(func-one-arg)', '*EOF*'],
+               ['3   3.14 "abc" \'DEF\'', '3 3.14 "abc" \'DEF\''],
+               ['', ''],
+               ['(*quote* 1 2 3)', '(1 2 3)'],
+               ['(*eval* + 1 2)', '(*eval-error* *eval* + 1 2)'],
+               ['(*let* (a . 1) . a)', '1'],
+               ['(*let* (a . (*quote* 1 2 3)). a)', '(1 2 3)'],
+               ['(*let* a . a)', 'a'],
+               ['(*let* a)', '()'],
+               ['(*let* 1 . a)', '(*eval-error* *let* 1 . a)'],
+               ['(*let* . a)', '(*eval-error* *let* . a)'],
+#               ['(1 2 . (3 4))', '(1 2 3 4)'],
+#               ['(eval + 1 2)', '3'],
+#               ['(eval +)', '0'],
+#               ['(eval + 1)', '1'],
+#               ['(eval - 10 (+ 1 2))', '7'],
+#               ['(1 eval + 2 3)', '(1 *eval* *+* 2 3)'],
+#               ['(1 . 2)', '(1 . 2)'],
+#               ['(eval cdr (*eval-result* 1 eval + 2 3))', '5'],
+#               ['(eval cdr (*eval-result* 1 . (eval + 2 3)))', '5'],
+#               ['(eval *eval-result* 1 2 (eval + 3 4))', '(1 2 (*eval* *+* 3 4))'],
+#               ['(eval / 1 0)', '(*eval-error* */* 1 0)'],
+#               ['(eval *let* (a . 3) . (+ a 2))', '5'],
+#               ['(eval (*func* . (+ (car _) 1)) 3)', '4'],
+#               ['(eval *let* (a . 10) . (*func* . (+ (car _) a)))', '(*func* *+* (*car* _) 10)'],
+#               ['(eval *let* (a . 10) . ((*func* . (+ (car _) a)) 3))', '13'],
+#               ['(func-one-arg)', '*EOF*'],
               ]
   count = 0
   test_case.each do |c|
@@ -626,9 +623,15 @@ end
 
 def do_expr_test(input, expected)
   expr = gl_parse_source(input)
-  stack = build_initial_stack
-  result, stack = gl_eval_root(expr, stack)
-  result_s = gl_to_s(result)
+  result_s = ''
+  expr.each do |expr|
+    stack = gl_build_initial_stack
+    result, stack = gl_eval_root(expr, stack)
+    if result_s.length > 0 then
+      result_s = result_s + ' '
+    end
+    result_s = result_s + gl_to_s(result)
+  end
   if result_s == expected then
     print "  OK    input: %s\n       output: %s\n" % [input, result_s]
     true
